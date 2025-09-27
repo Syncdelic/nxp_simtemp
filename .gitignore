@@ -1,0 +1,73 @@
+# Kernel module build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.order
+*.symvers
+modules.order
+Module.symvers
+*.cmd
+.*.cmd
+.tmp_versions/
+
+# Out-of-tree/build dirs
+/build/
+kernel/build/
+build/
+
+# DTS/DTB overlays
+*.dtb
+*.dtbo
+*.dts.tmp
+
+# User-space C/C++
+*.exe
+*.out
+*.a
+*.so
+*.so.*
+*.dll
+*.dSYM/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.eggs/
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+ENV/
+
+# Logs & runtime
+*.log
+*.pid
+
+# Editors/IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.orig
+*~
+tags
+compile_commands.json
+.ccls-cache/
+.clangd/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# QEMU images
+*.img
+*.qcow
+*.qcow2
