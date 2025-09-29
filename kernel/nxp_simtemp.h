@@ -49,6 +49,11 @@
  * @last_temp_mc:    last simulated temperature value (milli °C)
  * @sample_timer:    periodic timer producing samples
  * @chardev_name:    name assigned to the miscdevice
+ * @updates:         total samples generated
+ * @alerts:          total samples that crossed the threshold
+ * @errors:          total error events (invalid inputs, copy faults)
+ * @mode:            current simulation mode
+ * @ramp_increasing: ramp direction flag used in ramp mode
  */
 struct simtemp_device {
 	struct device *dev;
@@ -70,7 +75,19 @@ struct simtemp_device {
 	s32 last_temp_mc;
 	struct timer_list sample_timer;
 	char chardev_name[32];
+	u32 updates;
+	u32 alerts;
+	u32 errors;
+	enum simtemp_mode {
+		SIMTEMP_MODE_NORMAL = 0,
+		SIMTEMP_MODE_NOISY,
+		SIMTEMP_MODE_RAMP,
+		SIMTEMP_MODE_MAX
+	} mode;
+	bool ramp_increasing;
 };
+
+#define SIMTEMP_DEFAULT_MODE          SIMTEMP_MODE_NORMAL
 
 int simtemp_sysfs_register(struct simtemp_device *sim);
 void simtemp_sysfs_unregister(struct simtemp_device *sim);

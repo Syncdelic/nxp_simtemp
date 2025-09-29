@@ -22,6 +22,12 @@
 #include <linux/version.h>
 #include <linux/wait.h>
 
+static const char * const simtemp_mode_names[] = {
+	"normal",
+	"noisy",
+	"ramp",
+};
+
 #define SIMTEMP_TEMP_MIN_MC   20000
 #define SIMTEMP_TEMP_MAX_MC   80000
 #define SIMTEMP_TEMP_STEP_MC   800
@@ -69,14 +75,66 @@ static void simtemp_restart_timer(struct simtemp_device *sim)
 	mod_timer(&sim->sample_timer, jiffies + delay);
 }
 
+static void simtemp_set_mode(struct simtemp_device *sim, enum simtemp_mode mode)
+{
+	WRITE_ONCE(sim->mode, mode);
+	WRITE_ONCE(sim->ramp_increasing, true);
+	if (mode == SIMTEMP_MODE_RAMP)
+		WRITE_ONCE(sim->last_temp_mc, SIMTEMP_TEMP_MIN_MC);
+}
+
+static enum simtemp_mode simtemp_mode_from_string(const char *str)
+{
+	int i;
+
+	for (i = 0; i < SIMTEMP_MODE_MAX; i++) {
+		if (sysfs_streq(str, simtemp_mode_names[i]))
+			return i;
+	}
+
+	return SIMTEMP_MODE_MAX;
+}
+
 static s32 simtemp_generate_temp(struct simtemp_device *sim)
 {
-	s32 delta = (s32)(get_random_u32() % (2 * SIMTEMP_TEMP_STEP_MC + 1)) -
-		 SIMTEMP_TEMP_STEP_MC;
-	s32 temp = sim->last_temp_mc + delta;
+	enum simtemp_mode mode = READ_ONCE(sim->mode);
+	s32 temp = READ_ONCE(sim->last_temp_mc);
+
+	switch (mode) {
+	case SIMTEMP_MODE_NORMAL: {
+		s32 delta = (s32)(get_random_u32() % (2 * SIMTEMP_TEMP_STEP_MC + 1)) -
+			 SIMTEMP_TEMP_STEP_MC;
+		temp += delta;
+		break;
+	}
+	case SIMTEMP_MODE_NOISY: {
+		s32 delta = (s32)(get_random_u32() % (6 * SIMTEMP_TEMP_STEP_MC + 1)) -
+			 (3 * SIMTEMP_TEMP_STEP_MC);
+		temp += delta;
+		break;
+	}
+	case SIMTEMP_MODE_RAMP:
+	default: {
+		bool ramp_up = READ_ONCE(sim->ramp_increasing);
+
+		if (ramp_up)
+			temp += SIMTEMP_TEMP_STEP_MC;
+		else
+			temp -= SIMTEMP_TEMP_STEP_MC;
+		if (temp >= SIMTEMP_TEMP_MAX_MC) {
+			temp = SIMTEMP_TEMP_MAX_MC;
+			ramp_up = false;
+		} else if (temp <= SIMTEMP_TEMP_MIN_MC) {
+			temp = SIMTEMP_TEMP_MIN_MC;
+			ramp_up = true;
+		}
+		WRITE_ONCE(sim->ramp_increasing, ramp_up);
+		break;
+	}
+	}
 
 	temp = clamp_t(s32, temp, SIMTEMP_TEMP_MIN_MC, SIMTEMP_TEMP_MAX_MC);
-	sim->last_temp_mc = temp;
+	WRITE_ONCE(sim->last_temp_mc, temp);
 
 	return temp;
 }
@@ -100,9 +158,12 @@ static void simtemp_push_sample(struct simtemp_device *sim,
 	sim->ring[sim->head] = *sample;
 	sim->head = (sim->head + 1U) % SIMTEMP_RING_DEPTH;
 
+	sim->updates++;
+
 	sim->pending_events |= SIMTEMP_EVENT_SAMPLE;
 	if (sample->flags & SIMTEMP_SAMPLE_FLAG_THRESHOLD_ALERT) {
 		sim->alert_count++;
+		sim->alerts++;
 		sim->pending_events |= SIMTEMP_EVENT_THRESHOLD;
 	}
 
@@ -220,10 +281,124 @@ static ssize_t threshold_mC_store(struct device *dev,
 	return count;
 }
 static DEVICE_ATTR_RW(threshold_mC);
+static ssize_t mode_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct simtemp_device *sim;
+	enum simtemp_mode mode;
+
+	sim = simtemp_from_classdev(dev);
+	if (sim == NULL)
+		return -ENODEV;
+
+	mutex_lock(&sim->lock);
+	mode = sim->mode;
+	if (mode >= SIMTEMP_MODE_MAX)
+		mode = SIMTEMP_MODE_NORMAL;
+	mutex_unlock(&sim->lock);
+
+	return sysfs_emit(buf, "%s\n", simtemp_mode_names[mode]);
+}
+
+static ssize_t mode_store(struct device *dev,
+			 struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct simtemp_device *sim;
+	enum simtemp_mode mode;
+
+	sim = simtemp_from_classdev(dev);
+	if (sim == NULL)
+		return -ENODEV;
+
+	mode = simtemp_mode_from_string(buf);
+	if (mode >= SIMTEMP_MODE_MAX) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&sim->buf_lock, flags);
+		sim->errors++;
+		spin_unlock_irqrestore(&sim->buf_lock, flags);
+		dev_warn(sim->dev, "invalid mode request: %.*s\n", (int)count, buf);
+		return -EINVAL;
+	}
+
+	mutex_lock(&sim->lock);
+	simtemp_set_mode(sim, mode);
+	mutex_unlock(&sim->lock);
+
+	return count;
+}
+static DEVICE_ATTR_RW(mode);
+
+static ssize_t stats_show(struct device *dev,
+			 struct device_attribute *attr, char *buf)
+{
+	struct simtemp_device *sim;
+	unsigned long flags;
+	u32 updates, alerts, errors;
+
+	sim = simtemp_from_classdev(dev);
+	if (sim == NULL)
+		return -ENODEV;
+
+	spin_lock_irqsave(&sim->buf_lock, flags);
+	updates = sim->updates;
+	alerts = sim->alerts;
+	errors = sim->errors;
+	spin_unlock_irqrestore(&sim->buf_lock, flags);
+
+	return sysfs_emit(buf, "updates=%u alerts=%u errors=%u\n",
+			 updates, alerts, errors);
+}
+static DEVICE_ATTR_RO(stats);
+
+static void simtemp_parse_dt(struct simtemp_device *sim)
+{
+	struct device *dev = sim->dev;
+	struct device_node *np = dev->of_node;
+	u32 val;
+	const char *mode_str;
+	enum simtemp_mode mode;
+
+	if (!np)
+		return;
+
+	if (!of_property_read_u32(np, "sampling-ms", &val)) {
+		u32 clamped = clamp_t(u32, val,
+				    SIMTEMP_SAMPLING_MS_MIN, SIMTEMP_SAMPLING_MS_MAX);
+
+		if (clamped != val)
+			dev_warn(dev, "sampling-ms clamped to %u ms (was %u)\n",
+				 clamped, val);
+		sim->sampling_ms = clamped;
+	}
+
+	if (!of_property_read_u32(np, "threshold-mC", &val))
+		sim->threshold_mc = (s32)val;
+
+	if (!of_property_read_string(np, "mode", &mode_str)) {
+		mode = simtemp_mode_from_string(mode_str);
+		if (mode >= SIMTEMP_MODE_MAX) {
+			unsigned long flags;
+
+			spin_lock_irqsave(&sim->buf_lock, flags);
+			sim->errors++;
+			spin_unlock_irqrestore(&sim->buf_lock, flags);
+			dev_warn(dev, "invalid mode '%s' in DT, defaulting to %s\n",
+				 mode_str, simtemp_mode_names[SIMTEMP_DEFAULT_MODE]);
+			simtemp_set_mode(sim, SIMTEMP_DEFAULT_MODE);
+		} else {
+			simtemp_set_mode(sim, mode);
+		}
+	}
+}
+
 
 static struct attribute *simtemp_attrs[] = {
 	&dev_attr_sampling_ms.attr,
 	&dev_attr_threshold_mC.attr,
+	&dev_attr_mode.attr,
+	&dev_attr_stats.attr,
 	NULL,
 };
 
@@ -317,8 +492,13 @@ static ssize_t simtemp_read(struct file *file, char __user *buf, size_t count,
 	}
 	spin_unlock_irqrestore(&sim->buf_lock, flags);
 
-	if (copy_to_user(buf, &sample, sizeof(sample)))
+	if (copy_to_user(buf, &sample, sizeof(sample))) {
+		unsigned long err_flags;
+		spin_lock_irqsave(&sim->buf_lock, err_flags);
+		sim->errors++;
+		spin_unlock_irqrestore(&sim->buf_lock, err_flags);
 		return -EFAULT;
+	}
 
 	return sizeof(sample);
 }
@@ -374,8 +554,14 @@ static int simtemp_probe(struct platform_device *pdev)
 	sim->ring_count = 0U;
 	sim->pending_events = 0U;
 	sim->alert_count = 0U;
+	sim->updates = 0U;
+	sim->alerts = 0U;
+	sim->errors = 0U;
 	sim->stopping = false;
 	sim->last_temp_mc = SIMTEMP_DEFAULT_THRESHOLD_MC;
+	simtemp_set_mode(sim, SIMTEMP_DEFAULT_MODE);
+
+	simtemp_parse_dt(sim);
 
 	ret = ida_alloc(&simtemp_ida, GFP_KERNEL);
 	if (ret < 0) {

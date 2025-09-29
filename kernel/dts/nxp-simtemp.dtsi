@@ -12,6 +12,7 @@
 		compatible = "nxp,simtemp";
 		sampling-ms = <100>;
 		threshold-mC = <45000>;
+		mode = "normal";
 		status = "okay";
 	};
 };
