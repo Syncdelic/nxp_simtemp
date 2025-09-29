@@ -6,29 +6,29 @@ This document tracks the evolving architecture of the simulated temperature stac
 
 ```mermaid
 graph TD
-    subgraph User Space
-        CLI[CLI app (Python/C++)]
+    subgraph User_Space
+        CLI["CLI app (Python or C++)"]
     end
-    subgraph Kernel Module: nxp_simtemp
-        Sysfs[Sysfs class device<br/>/sys/class/simtemp/simtempN]
-        Control[Config & thresholds]
-        Timer[Sampling timer/workqueue]
-        Buffer[Sample ring buffer & flags]
-        CharDev[Character device /dev/simtemp]
+    subgraph Kernel_Module_nxp_simtemp
+        Sysfs["Sysfs class device\n/sys/class/simtemp/simtempN"]
+        Control["Config & thresholds"]
+        Timer["Sampling timer/workqueue"]
+        Buffer["Sample ring buffer & flags"]
+        CharDev["Character device /dev/simtemp"]
     end
-    subgraph Firmware Config
-        DT[Device Tree fragment<br/>(nxp-simtemp.dtsi)]
+    subgraph Firmware_Config
+        DT["Device Tree fragment\n(nxp-simtemp.dtsi)"]
     end
 
-    DT -->|sampling-ms<br/>threshold-mC| Control
-    CLI -->|sysfs writes/reads| Sysfs
-    CLI -->|poll/read| CharDev
+    DT -->|"sampling-ms<br/>threshold-mC"| Control
+    CLI -->|"sysfs writes/reads"| Sysfs
+    CLI -->|"poll/read"| CharDev
     Sysfs --> Control
     Control --> Timer
     Timer --> Buffer
     Buffer --> CharDev
     Control --> CharDev
-    CharDev -->|binary records| CLI
+    CharDev -->|"binary records"| CLI
 ```
 
 ## Portability strategy
