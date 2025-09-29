@@ -1,0 +1,17 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+
+/**
+ * NXP Simulated Temperature sensor Device Tree snippet.
+ *
+ * Example usage:
+ *   #include "nxp-simtemp.dtsi"
+ */
+
+/ {
+	simtemp0: simtemp@0 {
+		compatible = "nxp,simtemp";
+		sampling-ms = <100>;
+		threshold-mC = <45000>;
+		status = "okay";
+	};
+};
