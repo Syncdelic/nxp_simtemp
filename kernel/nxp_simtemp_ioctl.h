@@ -7,6 +7,9 @@
 
 #define SIMTEMP_IOCTL_MAGIC  't'
 
+#define SIMTEMP_SAMPLE_FLAG_NEW_SAMPLE       (1U << 0)
+#define SIMTEMP_SAMPLE_FLAG_THRESHOLD_ALERT  (1U << 1)
+
 /**
  * struct simtemp_sample - sample record shared between kernel and user space
  * @timestamp_ns: monotonic timestamp when the sample was produced

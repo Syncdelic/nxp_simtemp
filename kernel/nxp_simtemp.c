@@ -1,17 +1,36 @@
 // SPDX-License-Identifier: GPL-2.0
 #include "nxp_simtemp.h"
-#include "nxp_simtemp_ioctl.h"
 
-#include <linux/device.h>
+#include <linux/compiler.h>
 #include <linux/idr.h>
 #include <linux/init.h>
+#include <linux/fs.h>
+#include <linux/jiffies.h>
 #include <linux/kstrtox.h>
+#include <linux/ktime.h>
 #include <linux/minmax.h>
+#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/poll.h>
+#include <linux/random.h>
 #include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/timer.h>
+#include <linux/uaccess.h>
 #include <linux/version.h>
+#include <linux/wait.h>
+
+#define SIMTEMP_TEMP_MIN_MC   20000
+#define SIMTEMP_TEMP_MAX_MC   80000
+#define SIMTEMP_TEMP_STEP_MC   800
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
+#define simtemp_timer_shutdown(timer) timer_shutdown_sync(timer)
+#else
+#define simtemp_timer_shutdown(timer) del_timer_sync(timer)
+#endif
 
 static bool force_create_dev;
 module_param(force_create_dev, bool, 0444);
@@ -27,8 +46,91 @@ static struct simtemp_device *simtemp_from_classdev(struct device *dev)
 	return dev_get_drvdata(dev);
 }
 
+static bool simtemp_buffer_has_data(const struct simtemp_device *sim)
+{
+	return READ_ONCE(sim->ring_count) > 0U;
+}
+
+static unsigned long simtemp_delay_jiffies(const struct simtemp_device *sim)
+{
+	unsigned int ms = READ_ONCE(sim->sampling_ms);
+	unsigned long delay = msecs_to_jiffies(ms);
+	return delay ? delay : 1UL;
+}
+
+static void simtemp_restart_timer(struct simtemp_device *sim)
+{
+	unsigned long delay;
+
+	if (READ_ONCE(sim->stopping))
+		return;
+
+	delay = simtemp_delay_jiffies(sim);
+	mod_timer(&sim->sample_timer, jiffies + delay);
+}
+
+static s32 simtemp_generate_temp(struct simtemp_device *sim)
+{
+	s32 delta = (s32)(get_random_u32() % (2 * SIMTEMP_TEMP_STEP_MC + 1)) -
+		 SIMTEMP_TEMP_STEP_MC;
+	s32 temp = sim->last_temp_mc + delta;
+
+	temp = clamp_t(s32, temp, SIMTEMP_TEMP_MIN_MC, SIMTEMP_TEMP_MAX_MC);
+	sim->last_temp_mc = temp;
+
+	return temp;
+}
+
+static void simtemp_push_sample(struct simtemp_device *sim,
+					const struct simtemp_sample *sample)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&sim->buf_lock, flags);
+	if (sim->ring_count == SIMTEMP_RING_DEPTH) {
+		const struct simtemp_sample *old = &sim->ring[sim->tail];
+		if ((old->flags & SIMTEMP_SAMPLE_FLAG_THRESHOLD_ALERT) &&
+		    sim->alert_count > 0U)
+			sim->alert_count--;
+		sim->tail = (sim->tail + 1U) % SIMTEMP_RING_DEPTH;
+	} else {
+		sim->ring_count++;
+	}
+
+	sim->ring[sim->head] = *sample;
+	sim->head = (sim->head + 1U) % SIMTEMP_RING_DEPTH;
+
+	sim->pending_events |= SIMTEMP_EVENT_SAMPLE;
+	if (sample->flags & SIMTEMP_SAMPLE_FLAG_THRESHOLD_ALERT) {
+		sim->alert_count++;
+		sim->pending_events |= SIMTEMP_EVENT_THRESHOLD;
+	}
+
+	spin_unlock_irqrestore(&sim->buf_lock, flags);
+	wake_up_interruptible(&sim->waitq);
+}
+
+static void simtemp_timer_cb(struct timer_list *t)
+{
+	struct simtemp_device *sim = container_of(t, struct simtemp_device, sample_timer);
+	struct simtemp_sample sample = { 0 };
+	s32 temp;
+
+	temp = simtemp_generate_temp(sim);
+	sample.timestamp_ns = ktime_get_ns();
+	sample.temp_mc = temp;
+	sample.flags = SIMTEMP_SAMPLE_FLAG_NEW_SAMPLE;
+	if (temp >= READ_ONCE(sim->threshold_mc))
+		sample.flags |= SIMTEMP_SAMPLE_FLAG_THRESHOLD_ALERT;
+
+	simtemp_push_sample(sim, &sample);
+
+	if (!READ_ONCE(sim->stopping))
+		simtemp_restart_timer(sim);
+}
+
 static ssize_t sampling_ms_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
+				struct device_attribute *attr, char *buf)
 {
 	struct simtemp_device *sim;
 	u32 sampling;
@@ -45,8 +147,8 @@ static ssize_t sampling_ms_show(struct device *dev,
 }
 
 static ssize_t sampling_ms_store(struct device *dev,
-			struct device_attribute *attr,
-			 const char *buf, size_t count)
+				struct device_attribute *attr,
+				 const char *buf, size_t count)
 {
 	struct simtemp_device *sim;
 	unsigned int value;
@@ -72,12 +174,14 @@ static ssize_t sampling_ms_store(struct device *dev,
 	sim->sampling_ms = clamped;
 	mutex_unlock(&sim->lock);
 
+	simtemp_restart_timer(sim);
+
 	return count;
 }
 static DEVICE_ATTR_RW(sampling_ms);
 
 static ssize_t threshold_mC_show(struct device *dev,
-			struct device_attribute *attr, char *buf)
+				struct device_attribute *attr, char *buf)
 {
 	struct simtemp_device *sim;
 	s32 threshold;
@@ -94,8 +198,8 @@ static ssize_t threshold_mC_show(struct device *dev,
 }
 
 static ssize_t threshold_mC_store(struct device *dev,
-			struct device_attribute *attr,
-			 const char *buf, size_t count)
+				struct device_attribute *attr,
+				 const char *buf, size_t count)
 {
 	struct simtemp_device *sim;
 	int value;
@@ -156,6 +260,97 @@ void simtemp_sysfs_unregister(struct simtemp_device *sim)
 	sim->class_dev = NULL;
 }
 
+static struct simtemp_device *simtemp_from_file(struct file *file)
+{
+	return file->private_data;
+}
+
+static int simtemp_open(struct inode *inode, struct file *file)
+{
+	struct miscdevice *misc = file->private_data;
+	struct simtemp_device *sim =
+		container_of(misc, struct simtemp_device, miscdev);
+
+	file->private_data = sim;
+
+	return 0;
+}
+
+static ssize_t simtemp_read(struct file *file, char __user *buf, size_t count,
+			    loff_t *ppos)
+{
+	struct simtemp_device *sim = simtemp_from_file(file);
+	struct simtemp_sample sample;
+	unsigned long flags;
+
+	if (count < sizeof(sample))
+		return -EINVAL;
+
+	if (!(file->f_flags & O_NONBLOCK)) {
+		int ret = wait_event_interruptible(sim->waitq,
+						      sim->stopping || simtemp_buffer_has_data(sim));
+		if (ret)
+			return ret;
+	} else if (!simtemp_buffer_has_data(sim)) {
+		return -EAGAIN;
+	}
+
+	if (sim->stopping && !simtemp_buffer_has_data(sim))
+		return 0;
+
+	spin_lock_irqsave(&sim->buf_lock, flags);
+	if (!sim->ring_count) {
+		spin_unlock_irqrestore(&sim->buf_lock, flags);
+		return sim->stopping ? 0 : -EAGAIN;
+	}
+
+	sample = sim->ring[sim->tail];
+	sim->tail = (sim->tail + 1U) % SIMTEMP_RING_DEPTH;
+	sim->ring_count--;
+	if (sim->ring_count == 0U)
+		sim->pending_events &= ~SIMTEMP_EVENT_SAMPLE;
+	if ((sample.flags & SIMTEMP_SAMPLE_FLAG_THRESHOLD_ALERT) &&
+	    sim->alert_count > 0U) {
+		sim->alert_count--;
+		if (sim->alert_count == 0U)
+			sim->pending_events &= ~SIMTEMP_EVENT_THRESHOLD;
+	}
+	spin_unlock_irqrestore(&sim->buf_lock, flags);
+
+	if (copy_to_user(buf, &sample, sizeof(sample)))
+		return -EFAULT;
+
+	return sizeof(sample);
+}
+
+static __poll_t simtemp_poll(struct file *file, poll_table *wait)
+{
+	struct simtemp_device *sim = simtemp_from_file(file);
+	__poll_t mask = 0;
+	unsigned long flags;
+
+	poll_wait(file, &sim->waitq, wait);
+
+	spin_lock_irqsave(&sim->buf_lock, flags);
+	if (sim->ring_count)
+		mask |= POLLIN | POLLRDNORM;
+	if (sim->pending_events & SIMTEMP_EVENT_THRESHOLD)
+		mask |= POLLPRI;
+	if (sim->stopping)
+		mask |= POLLHUP;
+	spin_unlock_irqrestore(&sim->buf_lock, flags);
+
+	return mask;
+}
+
+static const struct file_operations simtemp_fops = {
+	.owner	= THIS_MODULE,
+	.open	= simtemp_open,
+	.read	= simtemp_read,
+	.poll	= simtemp_poll,
+	.llseek = noop_llseek,
+};
+
 static int simtemp_probe(struct platform_device *pdev)
 {
 	struct simtemp_device *sim;
@@ -166,17 +361,27 @@ static int simtemp_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	mutex_init(&sim->lock);
+	spin_lock_init(&sim->buf_lock);
+	init_waitqueue_head(&sim->waitq);
+	timer_setup(&sim->sample_timer, simtemp_timer_cb, 0);
+
 	sim->dev = &pdev->dev;
 	sim->class_dev = NULL;
 	sim->sampling_ms = SIMTEMP_DEFAULT_SAMPLING_MS;
 	sim->threshold_mc = SIMTEMP_DEFAULT_THRESHOLD_MC;
+	sim->head = 0U;
+	sim->tail = 0U;
+	sim->ring_count = 0U;
+	sim->pending_events = 0U;
+	sim->alert_count = 0U;
+	sim->stopping = false;
+	sim->last_temp_mc = SIMTEMP_DEFAULT_THRESHOLD_MC;
 
 	ret = ida_alloc(&simtemp_ida, GFP_KERNEL);
 	if (ret < 0) {
 		mutex_destroy(&sim->lock);
 		return ret;
 	}
-
 	sim->id = ret;
 
 	ret = simtemp_sysfs_register(sim);
@@ -186,7 +391,24 @@ static int simtemp_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	strscpy(sim->chardev_name, SIMTEMP_DRIVER_NAME, sizeof(sim->chardev_name));
+	sim->miscdev.minor = MISC_DYNAMIC_MINOR;
+	sim->miscdev.name = sim->chardev_name;
+	sim->miscdev.fops = &simtemp_fops;
+	sim->miscdev.parent = &pdev->dev;
+	sim->miscdev.mode = 0660;
+
+	ret = misc_register(&sim->miscdev);
+	if (ret) {
+		simtemp_sysfs_unregister(sim);
+		ida_free(&simtemp_ida, sim->id);
+		mutex_destroy(&sim->lock);
+		return ret;
+	}
+
 	platform_set_drvdata(pdev, sim);
+
+	simtemp_restart_timer(sim);
 
 	dev_info(&pdev->dev,
 		 "%s probed%s (sampling=%u ms threshold=%d mC)\n",
@@ -205,6 +427,10 @@ static void simtemp_remove(struct platform_device *pdev)
 	platform_set_drvdata(pdev, NULL);
 
 	if (sim != NULL) {
+		WRITE_ONCE(sim->stopping, true);
+		wake_up_interruptible(&sim->waitq);
+		simtemp_timer_shutdown(&sim->sample_timer);
+		misc_deregister(&sim->miscdev);
 		simtemp_sysfs_unregister(sim);
 		ida_free(&simtemp_ida, sim->id);
 		mutex_destroy(&sim->lock);
@@ -289,4 +515,4 @@ module_exit(simtemp_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Rodrigo Rea");
-MODULE_DESCRIPTION("NXP Simulated Temperature Sensor (skeleton with optional self-device)");
+MODULE_DESCRIPTION("NXP Simulated Temperature Sensor (data path skeleton)");
