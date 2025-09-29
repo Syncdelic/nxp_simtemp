@@ -13,23 +13,65 @@ The script cleans and rebuilds the out-of-tree module. On Secure Boot systems it
 ```bash
 sudo insmod kernel/nxp_simtemp.ko force_create_dev=1
 ls /sys/class/simtemp
-cat /sys/class/simtemp/simtemp0/sampling_ms
-cat /sys/class/simtemp/simtemp0/threshold_mC
+cat /sys/class/simtemp/simtemp0/{sampling_ms,threshold_mC,mode}
+cat /sys/class/simtemp/simtemp0/stats
 # demonstrate clamp + warning
 echo 1 | sudo tee /sys/class/simtemp/simtemp0/sampling_ms
 sudo dmesg | tail -n 5
 echo 100 | sudo tee /sys/class/simtemp/simtemp0/sampling_ms
+```
+
+### Read samples from `/dev/nxp_simtemp`
+
+```bash
+sudo dd if=/dev/nxp_simtemp of=/tmp/sample.bin bs=16 count=1
+hexdump -v -e '1/8 "%016x " 1/4 "%08x " 1/4 "%08x
+"' /tmp/sample.bin
+```
+
+Or stream a few records and inspect flags:
+
+```bash
+sudo python3 - <<'PY_STREAM'
+import os, struct, time
+fd = os.open('/dev/nxp_simtemp', os.O_RDONLY)
+for idx in range(5):
+    data = os.read(fd, 16)
+    ts_ns, temp_mc, flags = struct.unpack('<QiI', data)
+    ts = time.strftime('%H:%M:%S', time.gmtime(ts_ns / 1_000_000_000))
+    print(f"{idx}: {ts} temp={temp_mc/1000:.1f}°C flags=0x{flags:02x}")
+os.close(fd)
+PY_STREAM
+```
+
+### Exercise poll + threshold alerts
+
+```bash
+sudo python3 - <<'PY_POLL'
+import os, select, struct
+fd = os.open('/dev/nxp_simtemp', os.O_RDONLY | os.O_NONBLOCK)
+poller = select.poll()
+poller.register(fd, select.POLLIN | select.POLLPRI)
+for _ in range(3):
+    print('poll:', poller.poll(1000))
+    ts_ns, temp_mc, flags = struct.unpack('<QiI', os.read(fd, 16))
+    print(f"  temp={temp_mc/1000:.1f}°C flags=0x{flags:02x}")
+os.system('echo 25000 | sudo tee /sys/class/simtemp/simtemp0/threshold_mC >/dev/null')
+print('--- lowered threshold ---')
+for _ in range(3):
+    print('poll:', poller.poll(1000))
+    ts_ns, temp_mc, flags = struct.unpack('<QiI', os.read(fd, 16))
+    print(f"  temp={temp_mc/1000:.1f}°C flags=0x{flags:02x}")
+os.system('echo 45000 | sudo tee /sys/class/simtemp/simtemp0/threshold_mC >/dev/null')
+os.close(fd)
+PY_POLL
+```
+
+After testing, unload the module:
+
+```bash
 sudo rmmod nxp_simtemp
 ```
-
-Expected `dmesg` lines include the probe banner and the clamp warning:
-
-```
-nxp_simtemp: temporary platform_device created (no DT)
-nxp_simtemp nxp_simtemp: nxp_simtemp probed (name match) (sampling=100 ms threshold=45000 mC)
-nxp_simtemp nxp_simtemp: sampling_ms clamped to 5 ms (was 1)
-```
-
 ## Demo wrapper
 
 ```bash

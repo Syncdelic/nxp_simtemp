@@ -12,15 +12,15 @@ graph TD
     subgraph Kernel_Module_nxp_simtemp
         Sysfs["Sysfs class device\n/sys/class/simtemp/simtempN"]
         Control["Config & thresholds"]
-        Timer["Sampling timer/workqueue"]
-        Buffer["Sample ring buffer & flags"]
-        CharDev["Character device /dev/simtemp"]
+        Timer["Sampling timer & mode generator"]
+        Buffer["Sample ring buffer & counters"]
+        CharDev["Character device /dev/nxp_simtemp"]
     end
     subgraph Firmware_Config
         DT["Device Tree fragment\n(nxp-simtemp.dtsi)"]
     end
 
-    DT -->|"sampling-ms<br/>threshold-mC"| Control
+    DT -->|"sampling-ms<br/>threshold-mC<br/>mode"| Control
     CLI -->|"sysfs writes/reads"| Sysfs
     CLI -->|"poll/read"| CharDev
     Sysfs --> Control
@@ -30,6 +30,11 @@ graph TD
     Control --> CharDev
     CharDev -->|"binary records"| CLI
 ```
+
+### Current status
+- Timer-driven producer feeds a bounded FIFO; `/dev/nxp_simtemp` exposes packed `struct simtemp_sample` records with `POLLIN` (new sample) and `POLLPRI` (threshold) events.
+- Sysfs configuration covers `sampling_ms`, `threshold_mC`, and new `mode` selector (`normal|noisy|ramp`) plus `stats` counters (`updates/alerts/errors`).
+- Device Tree defaults (`sampling-ms`, `threshold-mC`, `mode`) are parsed during `probe()`, with clamping and fallbacks logged.
 
 ## Portability strategy
 
@@ -41,6 +46,6 @@ graph TD
 
 ## Next steps
 
-1. Implement the character device, ring buffer, and wait-queue driven alerting inside the kernel module.
-2. Extend the CLI to configure sampling/thresholds and consume binary samples via `poll()`.
-3. Add DT property parsing during `probe()` so ARM boards use their native configuration without module parameters.
+1. Build the user-space CLI to configure sysfs knobs, decode `struct simtemp_sample`, and validate alerts via `poll()`.
+2. Codify regression tests (`docs/TESTPLAN.md`) covering mode changes, stats counters, and DT overrides on ARM targets.
+3. Extend documentation with CLI usage + eventual demo video links; consider optional GUI/charting once CLI lands.

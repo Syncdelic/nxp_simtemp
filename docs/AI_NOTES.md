@@ -11,3 +11,12 @@
 - Updated demo script to automate the load → verify → clamp → unload flow; captured instructions for cross-arch portability.
 - Regenerated README with the new workflow and drafted DESIGN.md (Mermaid diagram) outlining kernel/user-space architecture.
 - Confirmed build/test steps locally before planning multi-commit history (kernel vs scripts vs docs).
+## 2025-09-29 — Character device & pollable data path
+- Added ring buffer + miscdevice implementation so `/dev/nxp_simtemp` streams `struct simtemp_sample`; validated blocking reads and `poll()`/`POLLPRI` alerts by lowering the threshold.
+- Updated generator to synthesize temperatures with jitter and ensured timers rebuild on sampling changes.
+- Ran manual tests (`dd`, Python poll snippet) after rebuild/sign to confirm event bits and alert path.
+
+## 2025-09-29 — Mode profiles, stats, and DT defaults
+- Introduced `mode` sysfs knob (`normal|noisy|ramp`) with stats counters and error tracking; verified invalid writes bump `errors` and recover gracefully.
+- Parsed `sampling-ms`, `threshold-mC`, and `mode` from DT, clamping with warnings where needed.
+- Refreshed README/DESIGN docs with char-device usage, poll workflow, and updated roadmap before proceeding to CLI work.
