@@ -72,6 +72,36 @@ After testing, unload the module:
 ```bash
 sudo rmmod nxp_simtemp
 ```
+## CLI quick start
+
+```bash
+sudo python3 user/cli/main.py stream --count 5
+sudo python3 user/cli/main.py stream --mode ramp --sampling-ms 200 --duration 3
+```
+
+Outputs lines such as `2025-09-29T13:57:12.123Z temp=41.3C alert=0 flags=0x01`.
+
+Run the built-in self-test (lowers the threshold temporarily, restores afterwards):
+
+```bash
+sudo python3 user/cli/main.py test
+```
+
+Use `--help` for the full option list.
+
+### CLI details
+
+- `stream` applies optional overrides (`--sampling-ms`, `--threshold-mc`, `--mode`) and prints ISO-8601 timestamps, temperatures, and flags; it runs until the `--count`/`--duration` limit or Ctrl+C.
+- `test` stores current sysfs values, lowers the threshold (and optional overrides), waits up to `--max-periods` sampling intervals for an alert (`flags=0x03`), prints PASS/FAIL, and restores the original configuration.
+- All commands require root privileges because they touch `/sys/class/simtemp/*` and `/dev/nxp_simtemp`; use `sudo` unless you have relaxed permissions.
+- On multi-device systems, use `--index` (pass it before the subcommand, e.g. `--index 1 stream`) to select `simtempN`, and `--device` if the character node differs.
+
+### Troubleshooting
+
+- If the module is not loaded, the CLI reports `sysfs root /sys/class/simtemp does not exist`; load it with `sudo insmod kernel/nxp_simtemp.ko force_create_dev=1`.
+- Invalid CLI choices are rejected early; writing unsupported values directly (e.g. `echo foo | sudo tee /sys/class/simtemp/simtemp0/mode`) returns `-EINVAL` and increments the `errors` field in `stats`.
+- After experiments, confirm settings with `cat /sys/class/simtemp/simtemp0/{sampling_ms,threshold_mC,mode,stats}` and restore defaults if needed.
+
 ## Demo wrapper
 
 ```bash

@@ -20,3 +20,4 @@
 - Introduced `mode` sysfs knob (`normal|noisy|ramp`) with stats counters and error tracking; verified invalid writes bump `errors` and recover gracefully.
 - Parsed `sampling-ms`, `threshold-mC`, and `mode` from DT, clamping with warnings where needed.
 - Refreshed README/DESIGN docs with char-device usage, poll workflow, and updated roadmap before proceeding to CLI work.
+- Exercised CLI `stream`/`test` commands (ramp/noisy overrides, invalid modes, missing device handling) to ensure alerts fire and sysfs state is restored.

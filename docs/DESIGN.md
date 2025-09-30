@@ -35,6 +35,7 @@ graph TD
 - Timer-driven producer feeds a bounded FIFO; `/dev/nxp_simtemp` exposes packed `struct simtemp_sample` records with `POLLIN` (new sample) and `POLLPRI` (threshold) events.
 - Sysfs configuration covers `sampling_ms`, `threshold_mC`, and new `mode` selector (`normal|noisy|ramp`) plus `stats` counters (`updates/alerts/errors`).
 - Device Tree defaults (`sampling-ms`, `threshold-mC`, `mode`) are parsed during `probe()`, with clamping and fallbacks logged.
+- Python CLI (`user/cli/main.py`) provides `stream` and `test` subcommands to configure the driver, print samples, and assert alert behaviour; default automation still to be linked into scripts/run_demo.sh.
 
 ## Portability strategy
 
@@ -46,6 +47,6 @@ graph TD
 
 ## Next steps
 
-1. Build the user-space CLI to configure sysfs knobs, decode `struct simtemp_sample`, and validate alerts via `poll()`.
-2. Codify regression tests (`docs/TESTPLAN.md`) covering mode changes, stats counters, and DT overrides on ARM targets.
-3. Extend documentation with CLI usage + eventual demo video links; consider optional GUI/charting once CLI lands.
+1. Integrate the CLI into automation (`run_demo.sh` / future CI) and document expected output for regression runs.
+2. Capture a dedicated TESTPLAN (mode toggles, stats counters, DT overrides, CLI test mode) ahead of ARM bring-up.
+3. Add README final deliverables (repo/video links, CLI usage summary) and explore optional GUI or ioctl batching if time allows.
