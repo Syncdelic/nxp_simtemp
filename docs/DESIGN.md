@@ -35,7 +35,7 @@ graph TD
 - Timer-driven producer feeds a bounded FIFO; `/dev/nxp_simtemp` exposes packed `struct simtemp_sample` records with `POLLIN` (new sample) and `POLLPRI` (threshold) events.
 - Sysfs configuration covers `sampling_ms`, `threshold_mC`, and new `mode` selector (`normal|noisy|ramp`) plus `stats` counters (`updates/alerts/errors`).
 - Device Tree defaults (`sampling-ms`, `threshold-mC`, `mode`) are parsed during `probe()`, with clamping and fallbacks logged.
-- Python CLI (`user/cli/main.py`) provides `stream` and `test` subcommands to configure the driver, print samples, and assert alert behaviour; default automation still to be linked into scripts/run_demo.sh.
+- Python CLI (`user/cli/main.py`) provides `stream` and `test` subcommands to configure the driver, print samples, and assert alert behaviour; future work includes wiring it into scripts/run_demo.sh and automated regression runs.
 
 ## Portability strategy
 

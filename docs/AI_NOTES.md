@@ -21,3 +21,4 @@
 - Parsed `sampling-ms`, `threshold-mC`, and `mode` from DT, clamping with warnings where needed.
 - Refreshed README/DESIGN docs with char-device usage, poll workflow, and updated roadmap before proceeding to CLI work.
 - Exercised CLI `stream`/`test` commands (ramp/noisy overrides, invalid modes, missing device handling) to ensure alerts fire and sysfs state is restored.
+- Restructured README to focus on build → load → CLI flow, leaving raw polling snippets as optional references.
