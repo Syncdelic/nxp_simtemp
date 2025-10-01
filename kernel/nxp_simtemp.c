@@ -178,7 +178,7 @@ static void simtemp_timer_cb(struct timer_list *t)
 	s32 temp;
 
 	temp = simtemp_generate_temp(sim);
-	sample.timestamp_ns = ktime_get_ns();
+	sample.timestamp_ns = ktime_get_real_ns();
 	sample.temp_mc = temp;
 	sample.flags = SIMTEMP_SAMPLE_FLAG_NEW_SAMPLE;
 	if (temp >= READ_ONCE(sim->threshold_mc))
