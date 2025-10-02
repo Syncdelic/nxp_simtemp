@@ -33,9 +33,15 @@ graph TD
 
 ### Current status
 - Timer-driven producer feeds a bounded FIFO; `/dev/nxp_simtemp` exposes packed `struct simtemp_sample` records with `POLLIN` (new sample) and `POLLPRI` (threshold) events.
-- Sysfs configuration covers `sampling_ms`, `threshold_mC`, and new `mode` selector (`normal|noisy|ramp`) plus `stats` counters (`updates/alerts/errors`).
-- Device Tree defaults (`sampling-ms`, `threshold-mC`, `mode`) are parsed during `probe()`, with clamping and fallbacks logged.
-- Python CLI (`user/cli/main.py`) provides `stream` and `test` subcommands to configure the driver, print samples, and assert alert behaviour; future work includes wiring it into scripts/run_demo.sh and automated regression runs.
+- Sysfs configuration covers `sampling_ms`, `threshold_mC`, and `mode` (`normal|noisy|ramp`) plus `stats` counters (`updates/alerts/errors`). Invalid writes increment `errors` and emit warnings.
+- Device Tree defaults (`sampling-ms`, `threshold-mC`, `mode`) are parsed during `probe()`, with clamping and fallbacks logged. A temporary platform device (`force_create_dev`) keeps x86 development snappy while DT overlays are drafted.
+- Python CLI (`user/cli/main.py`) provides `stream` and `test` subcommands using `select.poll()`; non-blocking reads now swallow `EAGAIN`, preventing spurious failures when the ring drains between wakeups.
+- Automation scripts: `build.sh` handles Secure Boot signing; `run_demo.sh` rebuilds on demand, loads, runs CLI stream/test, prints stats, and unloads.
+
+### Portability verification (2025-10-02)
+- Fedora 40 (6.16.8): module signs & loads; CLI stream/test + demo script pass.
+- Orange Pi Zero3 (Armbian 25, rebased to 6.12.47): rebuilt against Armbian headers, loaded without vermagic mismatch, CLI stream/test verified, demo script run manually. Secure Boot not enforced on board.
+- Remaining work: synthesize a DT overlay so `/dev/nxp_simtemp` binds automatically on the Orange Pi (and future DT hosts) without `force_create_dev=1`.
 
 ## Portability strategy
 
@@ -47,6 +53,7 @@ graph TD
 
 ## Next steps
 
-1. Integrate the CLI into automation (`run_demo.sh` / future CI) and document expected output for regression runs.
-2. Capture a dedicated TESTPLAN (mode toggles, stats counters, DT overrides, CLI test mode) ahead of ARM bring-up.
-3. Add README final deliverables (repo/video links, CLI usage summary) and explore optional GUI or ioctl batching if time allows.
+1. Produce and validate a DT overlay for `nxp,simtemp` on the Orange Pi Zero3 so the driver probes without `force_create_dev=1`.
+2. Explore high-rate sampling by swapping the legacy timer for `hrtimer`/high-resolution work, revisiting locking and buffer sizing for ≥1 kHz scenarios.
+3. Package the module with DKMS to survive kernel upgrades, and wire the CLI/demo into CI once overlay support lands.
+4. Finalise submission collateral: README links (repo/video), design narrative updates (locking, scaling), and git-send-email patch workflow.

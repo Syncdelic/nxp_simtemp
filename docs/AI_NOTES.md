@@ -22,3 +22,9 @@
 - Refreshed README/DESIGN docs with char-device usage, poll workflow, and updated roadmap before proceeding to CLI work.
 - Exercised CLI `stream`/`test` commands (ramp/noisy overrides, invalid modes, missing device handling) to ensure alerts fire and sysfs state is restored.
 - Restructured README to focus on build → load → CLI flow, leaving raw polling snippets as optional references.
+
+## 2025-10-02 — CLI robustness & Armbian bring-up
+- Prompted AI to guard non-blocking reads in the CLI (`BlockingIOError` -> retry) so the test mode stops failing with `EAGAIN` on the Orange Pi.
+- Captured Fedora vs Armbian build notes in README; documented the need to reboot into the 6.12.47 Armbian kernel before rebuilding the module.
+- Ran CLI `stream`/`test` on Orange Pi Zero3 (6.12.47-current-sunxi64) and recorded stats output for portability evidence.
+- Updated DESIGN.md (portability status, next steps), TESTPLAN.md (Armbian flow, stress note, DKMS optional), and README with cross-platform guidance.

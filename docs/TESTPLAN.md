@@ -1,6 +1,6 @@
 # Simtemp Test Plan
 
-## T1 — Build & Load (x86)
+## T1 — Build & Load (Fedora x86)
 **Commands**
 - `./scripts/build.sh`
 - `sudo insmod kernel/nxp_simtemp.ko force_create_dev=1`
@@ -12,13 +12,28 @@
 - `simtemp0` directory present under `/sys/class/simtemp`.
 - `/dev/nxp_simtemp` character device exists.
 
+## T1b — Build & Load (Orange Pi Zero3, Armbian 6.12.47)
+**Prereq**
+- Install kernel image/DTB/headers (`linux-{image,dtb,headers}-current-sunxi64_25.11.0-trunk_arm64__6.12.47-*.deb`) and reboot.
+
+**Commands**
+- `make -C /lib/modules/$(uname -r)/build M=$(pwd)/kernel modules`
+- `sudo insmod kernel/nxp_simtemp.ko force_create_dev=1`
+- `ls -l /dev/nxp_simtemp`
+- `sudo cat /sys/class/simtemp/simtemp0/stats`
+
+**Expected**
+- Module builds against `/usr/src/linux-headers-6.12.47-current-sunxi64` without `.gnu.linkonce.this_module` errors.
+- `/dev/nxp_simtemp` and `simtemp0` appear once loaded.
+- Primary counters (`updates`, `alerts`) increment after CLI tests; `errors` stays zero.
+
 ## T2 — CLI Stream
 **Commands**
 - `sudo python3 user/cli/main.py stream --count 5`
 
 **Expected**
 - Five lines printed with ISO-8601 timestamps, temperatures (°C), and flags (`0x01`/`0x03`).
-- Command exits cleanly; no errors.
+- Command exits cleanly; no errors (non-blocking reads recover from `EAGAIN`).
 
 ## T3 — CLI Alert Self-Test
 **Commands**
@@ -26,7 +41,7 @@
 - `cat /sys/class/simtemp/simtemp0/stats`
 
 **Expected**
-- CLI prints `PASS: alert observed ... flags=0x03` (or `FAIL` if alert missing).
+- CLI prints `PASS: alert observed ... flags=0x03`; restores original threshold/mode even on failure.
 - `stats` shows `updates` incremented, `errors` unchanged (unless negative tests follow).
 
 ## T4 — Mode & Stats Validation
@@ -64,25 +79,37 @@
 
 ## T7 — Device Tree Defaults (ARM target)
 **Commands**
-- Deploy overlay derived from `kernel/dts/nxp-simtemp.dtsi` to target (board-specific).
-- `make -C kernel KDIR=/path/to/headers`
+- Deploy overlay derived from `kernel/dts/nxp-simtemp.dtsi` (TBD; see next steps) so the driver probes without `force_create_dev`.
 - `sudo insmod kernel/nxp_simtemp.ko`
 - `cat /sys/class/simtemp/simtemp0/{sampling_ms,threshold_mC,mode}`
 - `sudo python3 user/cli/main.py stream --count 5`
 - `sudo python3 user/cli/main.py test`
 
 **Expected**
-- Sysfs reflects DT defaults.
+- Sysfs reflects DT defaults from the overlay.
 - CLI stream/test behave as on x86; alerts observed; stats update.
 - Module unloads cleanly afterward.
 
 ## T8 — Optional Stress / Scaling
 **Commands**
-- `sudo python3 user/cli/main.py stream --sampling-ms 10 --duration 5`
+- `echo 5 | sudo tee /sys/class/simtemp/simtemp0/sampling_ms`
+- `sudo python3 user/cli/main.py stream --duration 5`
 - `cat /sys/class/simtemp/simtemp0/stats`
 
 **Expected**
-- Stream runs without errors for 5 seconds; `updates` climbs quickly; `errors` remains 0.
-- Note any anomalies (missed samples, CPU load) for scaling discussion.
+- Stream runs without errors for 5 seconds at ~200 Hz (5 ms clamp); `updates` climbs quickly; `errors` remains 0.
+- Note CPU utilisation; document limitations and plan for hrtimer-based enhancement before attempting ≥1 kHz.
+
+## T9 — DKMS Packaging (optional)
+**Commands**
+- Create `/usr/src/nxp-simtemp-<ver>/dkms.conf`, add sources.
+- `sudo dkms add -m nxp-simtemp -v <ver>`
+- `sudo dkms build -m nxp-simtemp -v <ver>`
+- `sudo dkms install -m nxp-simtemp -v <ver>`
+
+**Expected**
+- DKMS builds the module against the running kernel with the same vermagic as manual builds.
+- `dkms status` lists `nxp-simtemp/<ver>, <kernel>: installed`.
+- Module loads via `modprobe nxp_simtemp` (with overlay when available).
 
 Record PASS/FAIL for each test and any observations (warnings, thresholds, anomalies) before submission.

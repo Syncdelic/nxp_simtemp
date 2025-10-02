@@ -1,89 +1,102 @@
 # simtemp
 
 ## Overview
-Simtemp ships an out-of-tree Linux kernel module (`nxp_simtemp`) that synthesizes temperature samples and exposes them via `/dev/nxp_simtemp`. A Python CLI (`user/cli/main.py`) configures the device through sysfs, streams samples, and verifies alert behaviour.
+`nxp_simtemp` is an out-of-tree Linux platform driver that synthesizes temperature samples and exposes them via a pollable misc character device. A Python CLI configures sampling and threshold knobs through sysfs, streams binary records (`struct simtemp_sample`), and verifies alert behaviour. Helper scripts handle module builds (including Secure Boot signing) and wrap the end-to-end demo.
 
-Workflow:
-1. Build the module (`./scripts/build.sh`).
-2. Load it (`sudo insmod kernel/nxp_simtemp.ko force_create_dev=1`).
-3. Use the CLI (`stream` / `test`) to exercise the data path.
-4. Unload when finished (`sudo rmmod nxp_simtemp`).
+Key folders:
+- `kernel/`: driver sources, Makefile, DT snippet.
+- `user/cli/`: Python CLI entry point.
+- `scripts/`: automation (`build.sh`, `run_demo.sh`).
+- `docs/`: design, test plan, AI notes, README.
 
-## Build
+## Prerequisites
+- GCC toolchain (`build-essential`, `kernel-devel`, etc.)
+- Matching kernel headers (`/lib/modules/$(uname -r)/build` must exist)
+- Python 3.8+ for the CLI
+- Root privileges for module load/unload, sysfs writes, and `/dev/nxp_simtemp` reads
+
+## Build workflow
 ```bash
 ./scripts/build.sh
 ```
+The script cleans `kernel/`, rebuilds `nxp_simtemp.ko`, and (when Secure Boot is enabled) signs it with the enrolled MOK keys under `/var/lib/shim-signed/keys/`.
 
-The script cleans, rebuilds, and signs `kernel/nxp_simtemp.ko`. On Secure-Boot-enabled hosts enrol your key first (see below).
+### Fedora 40 (x86_64)
+System headers live under `/usr/src/kernels/$(uname -r)`. No extra steps beyond `./scripts/build.sh` are required; ensure Secure Boot keys are enrolled if your machine enforces signature checks.
 
-## Load / Unload
+### Armbian 25 (Orange Pi Zero3)
+Armbian’s stock kernel (6.12.43) adds fields to `struct module`. Install the matching 6.12.47 image, DTB, and headers produced by the Armbian build tree, reboot, then rebuild:
+```bash
+# once on the board
+sudo dpkg -i linux-image-current-sunxi64_25.11.0-trunk_arm64__6.12.47-*.deb \
+             linux-dtb-current-sunxi64_25.11.0-trunk_arm64__6.12.47-*.deb \
+             linux-headers-current-sunxi64_25.11.0-trunk_arm64__6.12.47-*.deb
+sudo reboot
+
+# after reboot (uname -r -> 6.12.47-current-sunxi64)
+cd ~/nxp_simtemp
+make -C /lib/modules/$(uname -r)/build M=$(pwd)/kernel modules
+```
+The rebuilt module’s vermagic now matches the running kernel, eliminating `.gnu.linkonce.this_module` size errors.
+
+## Load & unload
 ```bash
 sudo insmod kernel/nxp_simtemp.ko force_create_dev=1
+# … interact with the device …
 sudo rmmod nxp_simtemp
 ```
-
-`force_create_dev=1` spawns a temporary platform device on x86. On DT-capable targets (Orange Pi, Jetson), omit the flag once an overlay instantiates the node.
+`force_create_dev=1` registers a temporary platform device for hosts without a Device Tree node (Fedora, pre-overlay Armbian). Once a DT overlay instantiates `compatible = "nxp,simtemp"`, drop the flag and rely on native probing.
 
 ## CLI usage
-Run commands as root so sysfs writes and reads from `/dev/nxp_simtemp` succeed.
+Run commands as root.
 
 ### Stream samples
 ```bash
 sudo python3 user/cli/main.py stream --count 5
 sudo python3 user/cli/main.py stream --mode ramp --sampling-ms 200 --duration 3
 ```
-Outputs lines such as `1970-01-01T15:48:55.258+00:00 temp=58.9C alert=1 flags=0x03`.
+Each iteration prints `ISO8601 temp=X.XC alert={0,1} flags=0x??`. Non-blocking reads now tolerate `EAGAIN`, avoiding the previous “Resource temporarily unavailable” error on busy systems.
 
-Options:
-- `--duration SECONDS`
-- `--sampling-ms 150`
-- `--threshold-mc 30000`
-- `--mode {normal,noisy,ramp}`
-
-### Alert self-test
+### Threshold self-test
 ```bash
-sudo python3 user/cli/main.py test
+sudo python3 user/cli/main.py test --max-periods 4
 ```
-The CLI temporarily lowers the threshold, waits up to `--max-periods` sampling intervals for an alert (`flags=0x03`), prints PASS/FAIL, and restores the prior configuration. Optional overrides: `--sampling-ms`, `--threshold-mc`, `--mode`.
+The CLI temporarily lowers the threshold (default 20 °C), waits up to `max_periods` sampling intervals for an alert, prints PASS/FAIL, and restores the prior configuration. Optional overrides: `--sampling-ms`, `--threshold-mc`, `--mode`.
 
-### Multiple devices / custom node
-```
-sudo python3 user/cli/main.py --index 1 stream --count 3
-sudo python3 user/cli/main.py --device /dev/simtemp1 test
-```
-`--index` must precede the subcommand and selects `simtempN` under `/sys/class/simtemp`. `--device` overrides the character node path.
+### Additional options
+- `--index N`: select `/sys/class/simtemp/simtempN`
+- `--device /dev/custom`: alternate char device path
+- `--duration T`: stop streaming after `T` seconds
 
-### Troubleshooting
-- `sysfs root /sys/class/simtemp does not exist`: load the module first (`sudo insmod …`).
-- Invalid CLI choices are rejected early; writing unsupported values directly (e.g. `echo foo | sudo tee /sys/class/simtemp/simtemp0/mode`) returns `-EINVAL` and increments the `errors` counter in `stats`.
-- Inspect current settings with `cat /sys/class/simtemp/simtemp0/{sampling_ms,threshold_mC,mode,stats}`.
-
-## Manual checks (optional)
-The CLI covers most workflows. For manual debugging you can still read sysfs attributes or capture binary samples:
+Inspect current settings and stats at any time:
 ```bash
-sudo dd if=/dev/nxp_simtemp of=/tmp/sample.bin bs=16 count=1
-hexdump -v -e '1/8 "%016x " 1/4 "%08x " 1/4 "%08x
-"' /tmp/sample.bin
+sudo cat /sys/class/simtemp/simtemp0/{sampling_ms,threshold_mC,mode,stats}
 ```
 
-## Demo script (WIP)
-`scripts/run_demo.sh` currently exercises the sampling clamp. CLI integration is planned.
+## Demo script
+```bash
+./scripts/run_demo.sh
+```
+Performs an on-demand rebuild, loads the module with `force_create_dev=1`, runs CLI `stream`/`test`, prints `stats`, and unloads. Exits non-zero on failure so it can gate CI once integrated.
 
 ## Secure Boot signing
-If `insmod` fails with “Key was rejected by service”, enrol a MOK and sign the module:
+If `insmod` reports `Key was rejected by service`, enrol a MOK and re-run `build.sh`:
 ```bash
-sudo openssl req -new -x509 -newkey rsa:2048 -sha256 -nodes   -days 36500 -subj "/CN=SimtempMOK/"   -keyout /var/lib/shim-signed/keys/MOK.priv   -outform DER -out /var/lib/shim-signed/keys/MOK.der
+sudo openssl req -new -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 \
+    -subj "/CN=SimtempMOK/" \
+    -keyout /var/lib/shim-signed/keys/MOK.priv \
+    -outform DER -out /var/lib/shim-signed/keys/MOK.der
 sudo mokutil --import /var/lib/shim-signed/keys/MOK.der
 ```
-After each build:
-```bash
-SIGN_SCRIPT="/usr/src/kernels/$(uname -r)/scripts/sign-file"
-sudo "$SIGN_SCRIPT" sha256   /var/lib/shim-signed/keys/MOK.priv   /var/lib/shim-signed/keys/MOK.der   kernel/nxp_simtemp.ko
-modinfo kernel/nxp_simtemp.ko | egrep 'signer|sig_key|sig_hash'
-```
+After the enrolment reboot, subsequent builds produce signed modules accepted by the kernel.
 
-## Portability plan
-- Install matching kernel headers (Ubuntu/Armbian `linux-headers-$(uname -r)` or vendor equivalent).
-- Apply a DT overlay derived from `kernel/dts/nxp-simtemp.dtsi` (set `sampling-ms`, `threshold-mC`, `mode`).
-- Build, load, and run the CLI `stream` / `test` commands to confirm behaviour.
-- Adjust module signing per platform (Jetson typically runs without Secure Boot; Armbian follows Ubuntu tooling).
+## Portability status
+- **Fedora 40 (6.16.8)**: module builds/signs/loads; CLI stream/test pass; `run_demo.sh` completes.
+- **Armbian 25 (6.12.47-current-sunxi64)**: module rebuilt against the Armbian tree; CLI stream/test validated on Orange Pi Zero3; demo script succeeds when invoked manually.
+- **Next step**: generate a DT overlay (based on `kernel/dts/nxp-simtemp.dtsi`) so `/dev/nxp_simtemp` appears without `force_create_dev=1`.
+
+## Documentation set
+- `docs/DESIGN.md`: architecture, DT mapping, portability roadmap.
+- `docs/TESTPLAN.md`: repeatable build/CLI/DT/stress checks for x86 and ARM targets.
+- `docs/AI_NOTES.md`: AI prompt history and validation notes (per challenge instructions).
+- README (this file): quick-start steps; will be amended with repo/video links before submission.
