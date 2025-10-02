@@ -109,7 +109,10 @@ def stream_command(args: argparse.Namespace) -> int:
             if not events:
                 continue
 
-            data = os.read(fd, SIMTEMP_SAMPLE_STRUCT.size)
+            try:
+                data = os.read(fd, SIMTEMP_SAMPLE_STRUCT.size)
+            except BlockingIOError:
+                continue
             if len(data) < SIMTEMP_SAMPLE_STRUCT.size:
                 continue
 
@@ -141,7 +144,10 @@ def wait_for_alert(char_device: Path, sampling_ms: int, max_periods: int) -> tup
             events = poller.poll(remaining_ms)
             if not events:
                 continue
-            data = os.read(fd, SIMTEMP_SAMPLE_STRUCT.size)
+            try:
+                data = os.read(fd, SIMTEMP_SAMPLE_STRUCT.size)
+            except BlockingIOError:
+                continue
             if len(data) < SIMTEMP_SAMPLE_STRUCT.size:
                 continue
             samples += 1
