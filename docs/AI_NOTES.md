@@ -28,3 +28,16 @@
 - Captured Fedora vs Armbian build notes in README; documented the need to reboot into the 6.12.47 Armbian kernel before rebuilding the module.
 - Ran CLI `stream`/`test` on Orange Pi Zero3 (6.12.47-current-sunxi64) and recorded stats output for portability evidence.
 - Updated DESIGN.md (portability status, next steps), TESTPLAN.md (Armbian flow, stress note, DKMS optional), and README with cross-platform guidance.
+- Added `kernel/dts/nxp-simtemp-overlay.dts` plus README/TESTPLAN instructions so `/dev/nxp_simtemp` appears without `force_create_dev` on DT-based boards.
+```synced-commands
+dtc -@ -I dts -O dtb -o /tmp/nxp-simtemp.dtbo kernel/dts/nxp-simtemp-overlay.dts
+sudo mount -t configfs none /sys/kernel/config
+sudo mkdir -p /sys/kernel/config/device-tree/overlays/nxp-simtemp
+sudo sh -c 'cat /tmp/nxp-simtemp.dtbo > /sys/kernel/config/device-tree/overlays/nxp-simtemp/dtbo'
+make -C /lib/modules/$(uname -r)/build M=$(pwd)/kernel clean modules
+sudo insmod kernel/nxp_simtemp.ko
+sudo python3 user/cli/main.py stream --count 5
+sudo python3 user/cli/main.py test
+sudo rmmod nxp_simtemp
+sudo rmdir /sys/kernel/config/device-tree/overlays/nxp-simtemp
+```

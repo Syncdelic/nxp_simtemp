@@ -78,17 +78,18 @@
 - Output ends with `Demo completed successfully.`
 
 ## T7 — Device Tree Defaults (ARM target)
-**Commands**
-- Deploy overlay derived from `kernel/dts/nxp-simtemp.dtsi` (TBD; see next steps) so the driver probes without `force_create_dev`.
-- `sudo insmod kernel/nxp_simtemp.ko`
-- `cat /sys/class/simtemp/simtemp0/{sampling_ms,threshold_mC,mode}`
-- `sudo python3 user/cli/main.py stream --count 5`
-- `sudo python3 user/cli/main.py test`
+- Mount configfs once (if not already): `sudo mount -t configfs none /sys/kernel/config`.
+- Build overlay: `dtc -@ -I dts -O dtb -o /tmp/nxp-simtemp.dtbo kernel/dts/nxp-simtemp-overlay.dts`.
+- Apply overlay: `sudo mkdir -p /sys/kernel/config/device-tree/overlays/nxp-simtemp` then `sudo sh -c 'cat /tmp/nxp-simtemp.dtbo > /sys/kernel/config/device-tree/overlays/nxp-simtemp/dtbo'`.
+- Load module built against Armbian headers: `sudo insmod kernel/nxp_simtemp.ko` (or `sudo modprobe nxp_simtemp` after installing the .ko into `/lib/modules`).
+- `ls -l /dev/nxp_simtemp` and `cat /sys/class/simtemp/simtemp0/{sampling_ms,threshold_mC,mode}`.
+- Run CLI: `sudo python3 user/cli/main.py stream --count 5` and `sudo python3 user/cli/main.py test`.
+- Clean up: `sudo rmmod nxp_simtemp; sudo rmdir /sys/kernel/config/device-tree/overlays/nxp-simtemp`.
 
 **Expected**
-- Sysfs reflects DT defaults from the overlay.
-- CLI stream/test behave as on x86; alerts observed; stats update.
-- Module unloads cleanly afterward.
+- Overlay registers `simtemp0` automatically; `sampling_ms`, `threshold_mC`, and `mode` reflect DT defaults.
+- CLI stream/test behave as on x86; stats update; no `force_create_dev` needed.
+- Module unloads/overlay removal leave sysfs/dev nodes clean.
 
 ## T8 — Optional Stress / Scaling
 **Commands**

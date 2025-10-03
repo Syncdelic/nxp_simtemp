@@ -47,6 +47,30 @@ sudo rmmod nxp_simtemp
 ```
 `force_create_dev=1` registers a temporary platform device for hosts without a Device Tree node (Fedora, pre-overlay Armbian). Once a DT overlay instantiates `compatible = "nxp,simtemp"`, drop the flag and rely on native probing.
 
+### Device Tree overlay on Orange Pi Zero3
+The overlay under `kernel/dts/nxp-simtemp-overlay.dts` adds a `simtemp@0` node so the driver probes without `force_create_dev`.
+
+1. Build the overlay (on the board or host):
+   ```bash
+   dtc -@ -I dts -O dtb \
+       -o /tmp/nxp-simtemp.dtbo kernel/dts/nxp-simtemp-overlay.dts
+   ```
+2. Apply at runtime through configfs:
+   ```bash
+   sudo mkdir -p /sys/kernel/config/device-tree/overlays/nxp-simtemp
+   sudo sh -c 'cat /tmp/nxp-simtemp.dtbo > \
+       /sys/kernel/config/device-tree/overlays/nxp-simtemp/dtbo'
+   ```
+3. Load the module (no extra parameters):
+   ```bash
+   sudo modprobe nxp_simtemp
+   ls -l /dev/nxp_simtemp
+   ```
+
+If `/sys/kernel/config` is empty, mount configfs first: `sudo mount -t configfs none /sys/kernel/config`.
+
+To remove the overlay, `sudo rmdir /sys/kernel/config/device-tree/overlays/nxp-simtemp` (after unloading the module). For a persistent setup on Armbian, copy the `.dtbo` to `/boot/dtb/overlay/` and add it to `/boot/armbianEnv.txt` via `overlays=nxp-simtemp`.
+
 ## CLI usage
 Run commands as root.
 
@@ -92,8 +116,8 @@ After the enrolment reboot, subsequent builds produce signed modules accepted by
 
 ## Portability status
 - **Fedora 40 (6.16.8)**: module builds/signs/loads; CLI stream/test pass; `run_demo.sh` completes.
-- **Armbian 25 (6.12.47-current-sunxi64)**: module rebuilt against the Armbian tree; CLI stream/test validated on Orange Pi Zero3; demo script succeeds when invoked manually.
-- **Next step**: generate a DT overlay (based on `kernel/dts/nxp-simtemp.dtsi`) so `/dev/nxp_simtemp` appears without `force_create_dev=1`.
+- **Armbian 25 (6.12.47-current-sunxi64)**: module rebuilt against the Armbian tree; DT overlay applied; CLI stream/test validated on Orange Pi Zero3 with overlay (no `force_create_dev`).
+- **Next step**: optional DKMS packaging so future kernel updates rebuild the module automatically.
 
 ## Documentation set
 - `docs/DESIGN.md`: architecture, DT mapping, portability roadmap.

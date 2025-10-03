@@ -53,7 +53,7 @@ graph TD
 
 ## Next steps
 
-1. Produce and validate a DT overlay for `nxp,simtemp` on the Orange Pi Zero3 so the driver probes without `force_create_dev=1`.
+1. Produce and validate the DT overlay (`kernel/dts/nxp-simtemp-overlay.dts`) on the Orange Pi Zero3 so the driver probes without `force_create_dev=1`.
 2. Explore high-rate sampling by swapping the legacy timer for `hrtimer`/high-resolution work, revisiting locking and buffer sizing for ≥1 kHz scenarios.
 3. Package the module with DKMS to survive kernel upgrades, and wire the CLI/demo into CI once overlay support lands.
 4. Finalise submission collateral: README links (repo/video), design narrative updates (locking, scaling), and git-send-email patch workflow.
