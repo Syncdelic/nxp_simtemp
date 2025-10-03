@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0
+/dts-v1/;
+/plugin/;
+
+/*
+ * Device Tree overlay that instantiates the nxp_simtemp platform device.
+ * Tested on Orange Pi Zero3 (Allwinner H618/H616 family).
+ */
+
+/ {
+    compatible = "xunlong,orangepi-zero3", "allwinner,sun50i-h616";
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            simtemp0: simtemp {
+                compatible = "nxp,simtemp";
+                sampling-ms = <100>;
+                threshold-mC = <45000>;
+                mode = "normal";
+                status = "okay";
+            };
+        };
+    };
+};

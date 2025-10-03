@@ -7,7 +7,7 @@
  *   #include "nxp-simtemp.dtsi"
  */
 
-/ {
+&{/} {
 	simtemp0: simtemp@0 {
 		compatible = "nxp,simtemp";
 		sampling-ms = <100>;
