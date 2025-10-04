@@ -22,6 +22,17 @@
 #include <linux/version.h>
 #include <linux/wait.h>
 
+#ifndef __builtin_types_compatible_p
+#define __builtin_types_compatible_p(type1, type2) 0
+#endif
+
+typedef typeof(((struct platform_driver *)0)->remove) simtemp_remove_proto_t;
+#if __builtin_types_compatible_p(simtemp_remove_proto_t, int (*)(struct platform_device *))
+#define SIMTEMP_REMOVE_RETURNS_INT 1
+#else
+#define SIMTEMP_REMOVE_RETURNS_INT 0
+#endif
+
 static const char * const simtemp_mode_names[] = {
 	"normal",
 	"noisy",
@@ -50,6 +61,16 @@ static struct platform_device *simtemp_pdev;
 static struct simtemp_device *simtemp_from_classdev(struct device *dev)
 {
 	return dev_get_drvdata(dev);
+}
+
+static inline struct simtemp_device *simtemp_from_timer(struct timer_list *timer)
+{
+	return (struct simtemp_device *)((char *)timer - offsetof(struct simtemp_device, sample_timer));
+}
+
+static inline struct simtemp_device *simtemp_from_misc(struct miscdevice *misc)
+{
+	return (struct simtemp_device *)((char *)misc - offsetof(struct simtemp_device, miscdev));
 }
 
 static bool simtemp_buffer_has_data(const struct simtemp_device *sim)
@@ -173,7 +194,7 @@ static void simtemp_push_sample(struct simtemp_device *sim,
 
 static void simtemp_timer_cb(struct timer_list *t)
 {
-	struct simtemp_device *sim = container_of(t, struct simtemp_device, sample_timer);
+	struct simtemp_device *sim = simtemp_from_timer(t);
 	struct simtemp_sample sample = { 0 };
 	s32 temp;
 
@@ -443,8 +464,7 @@ static struct simtemp_device *simtemp_from_file(struct file *file)
 static int simtemp_open(struct inode *inode, struct file *file)
 {
 	struct miscdevice *misc = file->private_data;
-	struct simtemp_device *sim =
-		container_of(misc, struct simtemp_device, miscdev);
+	struct simtemp_device *sim = simtemp_from_misc(misc);
 
 	file->private_data = sim;
 
@@ -605,7 +625,7 @@ static int simtemp_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int simtemp_remove(struct platform_device *pdev)
+static void simtemp_remove_impl(struct platform_device *pdev)
 {
 	struct simtemp_device *sim;
 
@@ -623,9 +643,21 @@ static int simtemp_remove(struct platform_device *pdev)
 	}
 
 	dev_info(&pdev->dev, "%s remove\n", SIMTEMP_DRIVER_NAME);
+}
+
+#if SIMTEMP_REMOVE_RETURNS_INT
+static int simtemp_remove(struct platform_device *pdev)
+{
+	simtemp_remove_impl(pdev);
 
 	return 0;
 }
+#else
+static void simtemp_remove(struct platform_device *pdev)
+{
+	simtemp_remove_impl(pdev);
+}
+#endif
 
 static const struct of_device_id simtemp_of_match[] = {
 	{ .compatible = SIMTEMP_COMPATIBLE },
