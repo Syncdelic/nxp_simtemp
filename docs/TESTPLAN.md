@@ -43,6 +43,9 @@
 - Script completes with `Built: kernel/nxp_simtemp.ko` (signing not required in the VM).
 - `modinfo kernel/nxp_simtemp.ko | grep vermagic` reports the running Ubuntu kernel (e.g. `6.8.0-85-generic`).
 
+**Result (2025-10-04)**
+- `./scripts/build.sh` → PASS (vermagic `6.8.0-85-generic`).
+
 ## T2 — CLI Stream
 **Commands**
 - `sudo python3 user/cli/main.py stream --count 5`

@@ -125,3 +125,6 @@ After the enrolment reboot, subsequent builds produce signed modules accepted by
 - `docs/TESTPLAN.md`: repeatable build/CLI/DT/stress checks for x86 and ARM targets.
 - `docs/AI_NOTES.md`: AI prompt history and validation notes (per challenge instructions).
 - README (this file): quick-start steps; will be amended with repo/video links before submission.
+## Submission Links (TO DO)
+- git repo: <ADD LINK>
+- Demo video: <ADD LINK>
