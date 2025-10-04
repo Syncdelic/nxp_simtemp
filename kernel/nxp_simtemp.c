@@ -22,17 +22,6 @@
 #include <linux/version.h>
 #include <linux/wait.h>
 
-#ifndef __builtin_types_compatible_p
-#define __builtin_types_compatible_p(type1, type2) 0
-#endif
-
-typedef typeof(((struct platform_driver *)0)->remove) simtemp_remove_proto_t;
-#if __builtin_types_compatible_p(simtemp_remove_proto_t, int (*)(struct platform_device *))
-#define SIMTEMP_REMOVE_RETURNS_INT 1
-#else
-#define SIMTEMP_REMOVE_RETURNS_INT 0
-#endif
-
 static const char * const simtemp_mode_names[] = {
 	"normal",
 	"noisy",
@@ -625,7 +614,7 @@ static int simtemp_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static void simtemp_remove_impl(struct platform_device *pdev)
+static int simtemp_remove_int(struct platform_device *pdev)
 {
 	struct simtemp_device *sim;
 
@@ -642,21 +631,23 @@ static void simtemp_remove_impl(struct platform_device *pdev)
 		mutex_destroy(&sim->lock);
 	}
 
-	dev_info(&pdev->dev, "%s remove\n", SIMTEMP_DRIVER_NAME);
-}
-
-#if SIMTEMP_REMOVE_RETURNS_INT
-static int simtemp_remove(struct platform_device *pdev)
-{
-	simtemp_remove_impl(pdev);
+    dev_info(&pdev->dev, "%s remove\n", SIMTEMP_DRIVER_NAME);
 
 	return 0;
 }
-#else
-static void simtemp_remove(struct platform_device *pdev)
+
+static void simtemp_remove_void(struct platform_device *pdev)
 {
-	simtemp_remove_impl(pdev);
+	(void)simtemp_remove_int(pdev);
 }
+
+#ifdef __GENKSYMS__
+#define SIMTEMP_REMOVE_INIT simtemp_remove_int
+#else
+#define SIMTEMP_REMOVE_INIT \
+	(_Generic(((struct platform_driver *)0)->remove, \
+		 int (*)(struct platform_device *): simtemp_remove_int, \
+		 void (*)(struct platform_device *): simtemp_remove_void))
 #endif
 
 static const struct of_device_id simtemp_of_match[] = {
@@ -667,7 +658,7 @@ MODULE_DEVICE_TABLE(of, simtemp_of_match);
 
 static struct platform_driver simtemp_driver = {
 	.probe = simtemp_probe,
-	.remove = simtemp_remove,
+	.remove = SIMTEMP_REMOVE_INIT,
 	.driver = {
 		.name = SIMTEMP_DRIVER_NAME,
 		.of_match_table = simtemp_of_match,
