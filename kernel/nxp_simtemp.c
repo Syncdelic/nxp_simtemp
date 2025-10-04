@@ -605,7 +605,7 @@ static int simtemp_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static void simtemp_remove(struct platform_device *pdev)
+static int simtemp_remove(struct platform_device *pdev)
 {
 	struct simtemp_device *sim;
 
@@ -623,6 +623,8 @@ static void simtemp_remove(struct platform_device *pdev)
 	}
 
 	dev_info(&pdev->dev, "%s remove\n", SIMTEMP_DRIVER_NAME);
+
+	return 0;
 }
 
 static const struct of_device_id simtemp_of_match[] = {

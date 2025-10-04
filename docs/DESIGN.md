@@ -41,7 +41,8 @@ graph TD
 ### Portability verification (2025-10-02)
 - Fedora 40 (6.16.8): module signs & loads; CLI stream/test + demo script pass.
 - Orange Pi Zero3 (Armbian 25, rebased to 6.12.47): rebuilt against Armbian headers, loaded without vermagic mismatch, CLI stream/test verified, demo script run manually. Secure Boot not enforced on board.
-- Remaining work: synthesize a DT overlay so `/dev/nxp_simtemp` binds automatically on the Orange Pi (and future DT hosts) without `force_create_dev=1`.
+- Ubuntu 24.04.3 LTS cloud VM (6.8.0-85): `./scripts/build.sh` compiles the module after enabling HTTPS apt sources and returning `simtemp_remove` as `int` to satisfy newer headers.
+- Remaining work: optional hrtimer path for ≥1 kHz sampling and DKMS packaging for painless kernel upgrades.
 
 ## Portability strategy
 

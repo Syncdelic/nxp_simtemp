@@ -27,6 +27,22 @@
 - `/dev/nxp_simtemp` and `simtemp0` appear once loaded.
 - Primary counters (`updates`, `alerts`) increment after CLI tests; `errors` stays zero.
 
+## T1c — Build (Ubuntu 24.04 LTS cloud VM)
+**Setup summary**
+- Launch Ubuntu 24.04 cloud image with libvirt (`virt-install --import --osinfo ubuntu24.04 ...`).
+- Ensure apt sources use HTTPS (IPv4 in the VM) before updating.
+
+**Commands**
+- `sudo apt update`
+- `sudo apt install -y build-essential linux-headers-$(uname -r) git python3`
+- `git clone https://github.com/Syncdelic/nxp_simtemp.git`
+- `cd nxp_simtemp`
+- `./scripts/build.sh`
+
+**Expected**
+- Script completes with `Built: kernel/nxp_simtemp.ko` (signing not required in the VM).
+- `modinfo kernel/nxp_simtemp.ko | grep vermagic` reports the running Ubuntu kernel (e.g. `6.8.0-85-generic`).
+
 ## T2 — CLI Stream
 **Commands**
 - `sudo python3 user/cli/main.py stream --count 5`

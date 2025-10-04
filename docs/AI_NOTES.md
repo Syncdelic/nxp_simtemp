@@ -41,3 +41,9 @@ sudo python3 user/cli/main.py test
 sudo rmmod nxp_simtemp
 sudo rmdir /sys/kernel/config/device-tree/overlays/nxp-simtemp
 ```
+
+## 2025-10-04 — Ubuntu 24.04 LTS validation
+- Launched the Ubuntu 24.04.3 LTS cloud image under libvirt (`virt-install --import --osinfo ubuntu24.04 ...`).
+- Forced apt to use HTTPS/IPv4 inside the VM, installed toolchain/headers, and ran `./scripts/build.sh` successfully (vermagic `6.8.0-85-generic`).
+- Adjusted `simtemp_remove` to return `int` (Ubuntu 6.8 headers treat the pointer mismatch as an error).
+- Documented the Ubuntu build path in README/TESTPLAN.
