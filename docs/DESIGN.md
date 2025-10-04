@@ -44,6 +44,17 @@ graph TD
 - Ubuntu 24.04.3 LTS cloud VM (6.8.0-85): `./scripts/build.sh` succeeds after switching apt sources to HTTPS; `./scripts/run_demo.sh` passes the stream/test sequence.
 - Remaining work: optional hrtimer path for ≥1 kHz sampling and DKMS packaging for painless kernel upgrades.
 
+## Locking & API rationale
+
+- **Mutex (`sim->lock`)** protects configuration fields (`sampling_ms`, `threshold_mC`, `mode`) across sysfs writes and DT parsing; these call paths can sleep, so we avoid spinlocks there.
+- **Spinlock (`sim->buf_lock`)** guards the ring buffer head/tail, counters, and pending events in timer and read paths where we need short, IRQ-safe sections.
+- **Sysfs vs ioctl**: configuration maps naturally to named attributes; sysfs keeps it discoverable/scriptable. This leaves ioctl for future batched control if needed.
+
+## Scaling & future work
+
+- Current sampling uses `timer_list` with a 5 ms clamp; supporting 10 kHz would require an `hrtimer` or high-resolution worker, larger ring depth, and careful profiling (CPU load, spinlock contention, batching reads).
+- DKMS packaging remains on the roadmap so the module rebuilds automatically after kernel upgrades.
+
 ## Portability strategy
 
 - **x86 development**: continue using `force_create_dev=1` for rapid iteration against Fedora kernels (6.x). The build scripts already handle Secure Boot signing via enrolled MOK keys.
