@@ -38,10 +38,10 @@ graph TD
 - Python CLI (`user/cli/main.py`) provides `stream` and `test` subcommands using `select.poll()`; non-blocking reads now swallow `EAGAIN`, preventing spurious failures when the ring drains between wakeups.
 - Automation scripts: `build.sh` handles Secure Boot signing; `run_demo.sh` rebuilds on demand, loads, runs CLI stream/test, prints stats, and unloads.
 
-### Portability verification (2025-10-02)
-- Fedora 40 (6.16.8): module signs & loads; CLI stream/test + demo script pass.
-- Orange Pi Zero3 (Armbian 25, rebased to 6.12.47): rebuilt against Armbian headers, loaded without vermagic mismatch, CLI stream/test verified, demo script run manually. Secure Boot not enforced on board.
-- Ubuntu 24.04.3 LTS cloud VM (6.8.0-85): `./scripts/build.sh` compiles the module after enabling HTTPS apt sources and returning `simtemp_remove` as `int` to satisfy newer headers.
+### Portability verification (2025-10-04)
+- Fedora 42 (6.16.8): `./scripts/build.sh` signs successfully; `./scripts/run_demo.sh` (stream/test) passes with stats.
+- Orange Pi Zero3 (Armbian 25, 6.12.47): rebuilt against Armbian headers, overlay applied, `./scripts/run_demo.sh` passes (stats updates, errors=0). Secure Boot not enforced on board.
+- Ubuntu 24.04.3 LTS cloud VM (6.8.0-85): `./scripts/build.sh` succeeds after switching apt sources to HTTPS; `./scripts/run_demo.sh` passes the stream/test sequence.
 - Remaining work: optional hrtimer path for ≥1 kHz sampling and DKMS packaging for painless kernel upgrades.
 
 ## Portability strategy
@@ -54,7 +54,7 @@ graph TD
 
 ## Next steps
 
-1. Produce and validate the DT overlay (`kernel/dts/nxp-simtemp-overlay.dts`) on the Orange Pi Zero3 so the driver probes without `force_create_dev=1`.
+1. Maintain the DT overlay (`kernel/dts/nxp-simtemp-overlay.dts`) on the Orange Pi Zero3 so the driver probes without `force_create_dev=1`, capturing results in TESTPLAN when rerun.
 2. Explore high-rate sampling by swapping the legacy timer for `hrtimer`/high-resolution work, revisiting locking and buffer sizing for ≥1 kHz scenarios.
 3. Package the module with DKMS to survive kernel upgrades, and wire the CLI/demo into CI once overlay support lands.
 4. Finalise submission collateral: README links (repo/video), design narrative updates (locking, scaling), and git-send-email patch workflow.

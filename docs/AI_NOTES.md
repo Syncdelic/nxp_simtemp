@@ -47,3 +47,8 @@ sudo rmdir /sys/kernel/config/device-tree/overlays/nxp-simtemp
 - Forced apt to use HTTPS/IPv4 inside the VM, installed toolchain/headers, and ran `./scripts/build.sh` successfully (vermagic `6.8.0-85-generic`).
 - Adjusted `simtemp_remove` to return `int` (Ubuntu 6.8 headers treat the pointer mismatch as an error).
 - Documented the Ubuntu build path in README/TESTPLAN.
+
+## 2025-10-04 — Multi-platform validation
+- Verified Fedora 42 build/sign + demo (`./scripts/build.sh`, `./scripts/run_demo.sh`).
+- Rebuilt on Orange Pi Zero3 with overlay applied; demo script confirmed stats (updates=9, alerts=9, errors=0).
+- Pulled latest code into Ubuntu 24.04.3 VM, reran build/demo sequence (stream/test PASS).

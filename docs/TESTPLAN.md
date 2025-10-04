@@ -1,6 +1,6 @@
 # Simtemp Test Plan
 
-## T1 — Build & Load (Fedora x86)
+## T1 — Build & Load (Fedora 42 x86)
 **Commands**
 - `./scripts/build.sh`
 - `sudo insmod kernel/nxp_simtemp.ko force_create_dev=1`
@@ -11,6 +11,9 @@
 - Build succeeds without errors (module signed if Secure Boot is enabled).
 - `simtemp0` directory present under `/sys/class/simtemp`.
 - `/dev/nxp_simtemp` character device exists.
+**Result (2025-10-04)**
+- `./scripts/build.sh` → PASS (Fedora 42, 6.16.8; module signed).
+- `./scripts/run_demo.sh` → PASS (stream/test + stats).
 
 ## T1b — Build & Load (Orange Pi Zero3, Armbian 6.12.47)
 **Prereq**
@@ -26,6 +29,9 @@
 - Module builds against `/usr/src/linux-headers-6.12.47-current-sunxi64` without `.gnu.linkonce.this_module` errors.
 - `/dev/nxp_simtemp` and `simtemp0` appear once loaded.
 - Primary counters (`updates`, `alerts`) increment after CLI tests; `errors` stays zero.
+**Result (2025-10-04)**
+- `make -C /lib/modules/... modules` → PASS (Armbian 6.12.47).
+- `./scripts/run_demo.sh` → PASS (overlay/stream/test/stats).
 
 ## T1c — Build (Ubuntu 24.04 LTS cloud VM)
 **Setup summary**
@@ -45,6 +51,7 @@
 
 **Result (2025-10-04)**
 - `./scripts/build.sh` → PASS (vermagic `6.8.0-85-generic`).
+- `./scripts/run_demo.sh` → PASS (stream/test + stats).
 
 ## T2 — CLI Stream
 **Commands**
@@ -109,6 +116,9 @@
 - Overlay registers `simtemp0` automatically; `sampling_ms`, `threshold_mC`, and `mode` reflect DT defaults.
 - CLI stream/test behave as on x86; stats update; no `force_create_dev` needed.
 - Module unloads/overlay removal leave sysfs/dev nodes clean.
+**Result (2025-10-04)**
+- Overlay applied on Orange Pi Zero3; `./scripts/run_demo.sh` → PASS (stream/test).
+- `stats` after demo: updates=9 alerts=9 errors=0.
 
 ## T8 — Optional Stress / Scaling
 **Commands**
