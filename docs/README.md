@@ -21,7 +21,7 @@ Key folders:
 ```
 The script cleans `kernel/`, rebuilds `nxp_simtemp.ko`, and (when Secure Boot is enabled) signs it with the enrolled MOK keys under `/var/lib/shim-signed/keys/`.
 
-### Fedora 40 (x86_64)
+### Fedora 42 (x86_64)
 System headers live under `/usr/src/kernels/$(uname -r)`. No extra steps beyond `./scripts/build.sh` are required; ensure Secure Boot keys are enrolled if your machine enforces signature checks.
 
 ### Armbian 25 (Orange Pi Zero3)
@@ -124,6 +124,15 @@ After the enrolment reboot, subsequent builds produce signed modules accepted by
 - `docs/TESTPLAN.md`: repeatable build/CLI/DT/stress checks for x86 and ARM targets.
 - `docs/AI_NOTES.md`: AI prompt history and validation notes (per challenge instructions).
 - README (this file): quick-start steps; will be amended with repo/video links before submission.
+
+## Testing
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest -vv
+```
+`pytest -vv` surfaces each boundary, white-box, and black-box case in `tests/test_cli.py`, while `./scripts/run_demo.sh` exercises the end-to-end kernel/CLI flow.
 
 ## Out-of-scope
 - GUI dashboard and additional lint tooling remain out of scope for this challenge submission.

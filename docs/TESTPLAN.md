@@ -132,7 +132,21 @@
 **Result (2025-10-09)**
 - PASS (Orange Pi Zero3 with DT overlay: `insmod` sans force flag, stream/test succeeded, stats=updates=357 alerts=349 errors=0, clean unload/overlay removal).
 
-## T8 — Optional Stress / Scaling
+## T8 — CLI Unit Tests (desktop/Linux)
+**Commands**
+- `python3 -m venv .venv`
+- `source .venv/bin/activate`
+- `pip install -r requirements-dev.txt`
+- `pytest -vv`
+- `deactivate`
+
+**Expected**
+- Unit suite (boundary/white-box/black-box cases) in `tests/test_cli.py` passes; no external dependencies.
+
+**Result (2025-10-09)**
+- PASS (`pytest -vv` reported 15/15 tests in 0.14s on Fedora 42).
+
+## T9 — Optional Stress / Scaling
 **Commands**
 - `echo 5 | sudo tee /sys/class/simtemp/simtemp0/sampling_ms`
 - `sudo python3 user/cli/main.py stream --duration 5`

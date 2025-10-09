@@ -52,3 +52,8 @@ sudo rmdir /sys/kernel/config/device-tree/overlays/nxp-simtemp
 - Verified Fedora 42 build/sign + demo (`./scripts/build.sh`, `./scripts/run_demo.sh`).
 - Rebuilt on Orange Pi Zero3 with overlay applied; demo script confirmed stats (updates=9, alerts=9, errors=0).
 - Pulled latest code into Ubuntu 24.04.3 VM, reran build/demo sequence (stream/test PASS).
+
+## 2025-10-09 — CLI unit test coverage
+- Added pytest suite (`tests/test_cli.py`) covering boundary, white-box, and black-box cases for the Python CLI helpers.
+- Introduced `requirements-dev.txt` plus README instructions for creating a venv and running `pytest -vv`.
+- Captured the pytest workflow in `docs/TESTPLAN.md` (new T8) with recorded PASS results on Fedora 42.

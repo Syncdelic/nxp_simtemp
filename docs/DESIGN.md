@@ -38,10 +38,11 @@ graph TD
 - Python CLI (`user/cli/main.py`) provides `stream` and `test` subcommands using `select.poll()`; non-blocking reads now swallow `EAGAIN`, preventing spurious failures when the ring drains between wakeups.
 - Automation scripts: `build.sh` handles Secure Boot signing; `run_demo.sh` rebuilds on demand, loads, runs CLI stream/test, prints stats, and unloads.
 
-### Portability verification (2025-10-04)
-- Fedora 42 (6.16.8): `./scripts/build.sh` signs successfully; `./scripts/run_demo.sh` (stream/test) passes with stats.
-- Orange Pi Zero3 (Armbian 25, 6.12.47): rebuilt against Armbian headers, overlay applied, `./scripts/run_demo.sh` passes (stats updates, errors=0). Secure Boot not enforced on board.
+### Verification status (2025-10-09)
+- Fedora 42 (6.16.8 / 6.16.9): `./scripts/build.sh` signs successfully; `./scripts/run_demo.sh` (stream/test) passes; `pytest -vv` reports 15/15 CLI unit tests.
+- Orange Pi Zero3 (Armbian 25, 6.12.47): rebuilt against Armbian headers, configfs overlay applied, `./scripts/run_demo.sh` passes (stats updates, errors=0).
 - Ubuntu 24.04.3 LTS cloud VM (6.8.0-85): `./scripts/build.sh` succeeds after switching apt sources to HTTPS; `./scripts/run_demo.sh` passes the stream/test sequence.
+- Raspberry Pi 4B (6.12.44-current-bcm2711): `./scripts/run_demo.sh` passes on stock Raspberry Pi OS (driver + CLI flows).
 - Remaining work: optional hrtimer path for ≥1 kHz sampling and tighter CI integration.
 
 ## Locking & API rationale
@@ -50,15 +51,11 @@ graph TD
 - **Spinlock (`sim->buf_lock`)** guards the ring buffer head/tail, counters, and pending events in timer and read paths where we need short, IRQ-safe sections.
 - **Sysfs vs ioctl**: configuration maps naturally to named attributes; sysfs keeps it discoverable/scriptable. This leaves ioctl for future batched control if needed.
 
-## Scaling & future work
-
-- Current sampling uses `timer_list` with a 5 ms clamp; supporting 10 kHz would require an `hrtimer` or high-resolution worker, larger ring depth, and careful profiling (CPU load, spinlock contention, batching reads).
-
 ## Portability strategy
 
 - **x86 development**: continue using `force_create_dev=1` for rapid iteration against Fedora kernels (6.x). The build scripts already handle Secure Boot signing via enrolled MOK keys.
 - **Orange Pi Zero3 (Armbian 25 / Ubuntu 24)**: install matching kernel headers, include `kernel/dts/nxp-simtemp.dtsi` in a board overlay, and rely on native DT probing instead of the forced platform device.
-- **Jetson Orin Nano (JetPack 6.2 / Ubuntu 22)**: the NVIDIA kernel tree is based on LTS kernels; ensure the `class_create()` compatibility macro remains valid and sign modules per Jetson’s toolchain if Secure Boot is enabled.
+- **Raspberry Pi 4B (Raspberry Pi OS)**: rely on the included automation (`./scripts/run_demo.sh`) to build/load; no overlay required thanks to the temporary platform device.
 - **Common API surface**: maintain `nxp_simtemp_ioctl.h` as the shared contract between kernel and CLI so record layouts remain consistent across architectures.
 - **Testing parity**: reuse the sysfs + poll regression steps on every target. Capture results in `docs/TESTPLAN.md` once the CLI is online to flag any platform-specific anomalies.
 
