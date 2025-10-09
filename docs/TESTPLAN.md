@@ -60,6 +60,8 @@
 **Expected**
 - Five lines printed with ISO-8601 timestamps, temperatures (°C), and flags (`0x01`/`0x03`).
 - Command exits cleanly; no errors (non-blocking reads recover from `EAGAIN`).
+**Result (2025-10-09)**
+- PASS (`stream --count 5` emitted 5 samples, flags toggled 0x03/0x01, dmesg clean).
 
 ## T3 — CLI Alert Self-Test
 **Commands**
@@ -69,6 +71,8 @@
 **Expected**
 - CLI prints `PASS: alert observed ... flags=0x03`; restores original threshold/mode even on failure.
 - `stats` shows `updates` incremented, `errors` unchanged (unless negative tests follow).
+**Result (2025-10-09)**
+- PASS (`test` observed alert after 65 samples; stats -> updates=785 alerts=43 errors=0).
 
 ## T4 — Mode & Stats Validation
 **Commands**
@@ -82,6 +86,8 @@
 - Stream output shows ramping temperatures; alerts trigger (`flags=0x03`).
 - Mode reads back `ramp` during stream. Invalid write returns `Invalid argument`; `stats` `errors` increases by 1.
 - Mode restored to `normal` afterward.
+**Result (2025-10-09)**
+- PASS (ramp stream produced threshold alerts; invalid `mode` write -> -EINVAL + dmesg warn; stats errors incremented to 1, mode restored to `normal`).
 
 ## T5 — Negative CLI Cases
 **Commands**
@@ -94,6 +100,8 @@
 - First command prints parser error about index out of range.
 - With module unloaded, CLI reports `sysfs root /sys/class/simtemp does not exist`.
 - Module reloads cleanly for subsequent tests.
+**Result (2025-10-09)**
+- PASS (CLI rejected `--index 5`; missing sysfs reported with module removed; `insmod ... force_create_dev=1` reloaded without errors).
 
 ## T6 — Demo Script
 **Commands**
@@ -102,6 +110,8 @@
 **Expected**
 - Script loads module, runs CLI stream/test, prints stats, and unloads.
 - Output ends with `Demo completed successfully.`
+**Result (2025-10-09)**
+- PASS (`run_demo.sh` rebuilt, ran stream/test, printed stats updates=8 alerts=4 errors=0, and unloaded cleanly).
 
 ## T7 — Device Tree Defaults (ARM target)
 - Mount configfs once (if not already): `sudo mount -t configfs none /sys/kernel/config`.
@@ -119,6 +129,8 @@
 **Result (2025-10-04)**
 - Overlay applied on Orange Pi Zero3; `./scripts/run_demo.sh` → PASS (stream/test).
 - `stats` after demo: updates=9 alerts=9 errors=0.
+**Result (2025-10-09)**
+- PASS (Orange Pi Zero3 with DT overlay: `insmod` sans force flag, stream/test succeeded, stats=updates=357 alerts=349 errors=0, clean unload/overlay removal).
 
 ## T8 — Optional Stress / Scaling
 **Commands**
