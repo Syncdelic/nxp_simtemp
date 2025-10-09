@@ -142,16 +142,5 @@
 - Stream runs without errors for 5 seconds at ~200 Hz (5 ms clamp); `updates` climbs quickly; `errors` remains 0.
 - Note CPU utilisation; document limitations and plan for hrtimer-based enhancement before attempting ≥1 kHz.
 
-## T9 — DKMS Packaging (optional)
-**Commands**
-- Create `/usr/src/nxp-simtemp-<ver>/dkms.conf`, add sources.
-- `sudo dkms add -m nxp-simtemp -v <ver>`
-- `sudo dkms build -m nxp-simtemp -v <ver>`
-- `sudo dkms install -m nxp-simtemp -v <ver>`
-
-**Expected**
-- DKMS builds the module against the running kernel with the same vermagic as manual builds.
-- `dkms status` lists `nxp-simtemp/<ver>, <kernel>: installed`.
-- Module loads via `modprobe nxp_simtemp` (with overlay when available).
 
 Record PASS/FAIL for each test and any observations (warnings, thresholds, anomalies) before submission.
