@@ -61,6 +61,6 @@ graph TD
 
 ## Next steps
 
-1. Maintain the DT overlay (`kernel/dts/nxp-simtemp-overlay.dts`) on the Orange Pi Zero3 so the driver probes without `force_create_dev=1`, capturing results in TESTPLAN when rerun.
-2. Explore high-rate sampling by swapping the legacy timer for `hrtimer`/high-resolution work, revisiting locking and buffer sizing for ≥1 kHz scenarios.
-3. Finalise submission collateral: README links (repo/video), design narrative updates (locking, scaling), and git-send-email patch workflow.
+1. Explore high-rate sampling by swapping the legacy timer for `hrtimer`/high-resolution work, revisiting locking and buffer sizing for ≥1 kHz scenarios.
+2. Finalise submission collateral: README links (repo/video), design narrative updates (locking, scaling), and git-send-email patch workflow.
+3. Evaluate automation (CI or scripted stress runs) once the high-rate path lands.

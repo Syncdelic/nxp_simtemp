@@ -115,9 +115,10 @@ sudo mokutil --import /var/lib/shim-signed/keys/MOK.der
 After the enrolment reboot, subsequent builds produce signed modules accepted by the kernel.
 
 ## Portability status
-- **Fedora 42 (6.16.8)**: module builds/signs/loads; CLI stream/test pass; `run_demo.sh` completes.
+- **Fedora 42 (6.16.8/6.16.9)**: module builds/signs/loads; CLI stream/test pass; `run_demo.sh` completes.
 - **Armbian 25 (6.12.47-current-sunxi64)**: module rebuilt against the Armbian tree; DT overlay applied; CLI stream/test validated on Orange Pi Zero3 with overlay (no `force_create_dev`).
 - **Ubuntu 24.04.3 LTS (6.8.0-85-generic, cloud VM)**: `./scripts/build.sh` builds the module after switching apt sources to HTTPS; vermagic matches the stock kernel.
+- **Raspberry Pi OS (6.12.44-current-bcm2711)**: `./scripts/run_demo.sh` builds/loads the module on Raspberry Pi 4B (no overlay required); CLI stream/test pass end-to-end.
 
 ## Documentation set
 - `docs/DESIGN.md`: architecture, DT mapping, portability roadmap.

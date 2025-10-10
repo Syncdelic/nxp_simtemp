@@ -112,6 +112,8 @@
 - Output ends with `Demo completed successfully.`
 **Result (2025-10-09)**
 - PASS (`run_demo.sh` rebuilt, ran stream/test, printed stats updates=8 alerts=4 errors=0, and unloaded cleanly).
+**Result (2025-10-09, Raspberry Pi 4B)**
+- PASS (`run_demo.sh` built against 6.12.44-current-bcm2711; stream/test PASS, stats updates=7 alerts=1 errors=0).
 
 ## T7 — Device Tree Defaults (ARM target)
 - Mount configfs once (if not already): `sudo mount -t configfs none /sys/kernel/config`.
