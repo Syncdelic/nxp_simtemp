@@ -8,7 +8,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Optional, Tuple, Union
 
 import pytest
 
@@ -80,6 +80,7 @@ def test_non_negative_int_boundary_invalid(value: str) -> None:
 
 def _write_attrs(devdir: Path, *, sampling: int, threshold: int, mode: str) -> None:
     (devdir / "sampling_ms").write_text(f"{sampling}\n")
+    (devdir / "sampling_us").write_text(f"{sampling * 1000}\n")
     (devdir / "threshold_mC").write_text(f"{threshold}\n")
     (devdir / "mode").write_text(f"{mode}\n")
 
@@ -94,7 +95,7 @@ def test_simtemp_device_snapshot_and_write(tmp_path: Path) -> None:
 
     device = cli.SimtempDevice(sysfs_root, index=0, device_path=Path("/dev/fake"))
     snapshot = device.snapshot()
-    assert snapshot.sampling_ms == 100
+    assert snapshot.sampling_us == 100 * 1000
     assert snapshot.threshold_mc == 45000
     assert snapshot.mode == "normal"
 
@@ -129,6 +130,36 @@ def test_simtemp_device_chooses_sorted_entry(tmp_path: Path) -> None:
     assert second.sysfs_dir == dev1
 
 
+def test_write_sampling_prefers_microseconds(tmp_path: Path) -> None:
+    sysfs_root = tmp_path
+    devdir = sysfs_root / "simtemp0"
+    devdir.mkdir()
+    _write_attrs(devdir, sampling=100, threshold=45000, mode="normal")
+
+    device = cli.SimtempDevice(sysfs_root, index=0, device_path=None)
+    cli.write_sampling(device, sampling_us=500, sampling_ms=None)
+    assert (devdir / "sampling_us").read_text().strip() == "500"
+
+
+def test_write_sampling_fallbacks_to_ms(tmp_path: Path) -> None:
+    sysfs_root = tmp_path
+    devdir = sysfs_root / "simtemp0"
+    devdir.mkdir()
+    _write_attrs(devdir, sampling=100, threshold=45000, mode="normal")
+
+    device = cli.SimtempDevice(sysfs_root, index=0, device_path=None)
+    original_write = device.write
+
+    def fake_write(name: str, value: str) -> None:
+        if name == "sampling_us":
+            raise FileNotFoundError("sampling_us missing")
+        original_write(name, value)
+
+    device.write = fake_write  # type: ignore[assignment]
+    cli.write_sampling(device, sampling_us=500, sampling_ms=None)
+    assert (devdir / "sampling_ms").read_text().strip() == "1"
+
+
 # ---------------------------------------------------------------------------
 # White-box tests for wait_for_alert (exercise internal polling behaviour)
 # ---------------------------------------------------------------------------
@@ -138,9 +169,9 @@ def test_wait_for_alert_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """wait_for_alert returns a sample when poll/read deliver data before timeout."""
 
     fd = 99
-    opened: list[Path] = []
+    opened: List[Path] = []
 
-    def fake_open(path: str | Path, flags: int) -> int:
+    def fake_open(path: Union[str, Path], flags: int) -> int:
         opened.append(Path(path))
         return fd
 
@@ -163,13 +194,13 @@ def test_wait_for_alert_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class FakePoll:
         def __init__(self) -> None:
-            self.registered: tuple[int, int] | None = None
+            self.registered: Optional[Tuple[int, int]] = None
             self.calls = 0
 
         def register(self, handle: int, events: int) -> None:
             self.registered = (handle, events)
 
-        def poll(self, timeout: int) -> list[tuple[int, int]]:
+        def poll(self, timeout: int) -> List[Tuple[int, int]]:
             self.calls += 1
             assert timeout > 0
             return [(fd, 0)]  # signal data immediately
@@ -186,7 +217,7 @@ def test_wait_for_alert_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "monotonic", fake_monotonic)
     monkeypatch.setattr(cli.time, "monotonic", fake_monotonic)
 
-    success, sample, count = cli.wait_for_alert(Path("/dev/nxp_simtemp"), sampling_ms=100, max_periods=1)
+    success, sample, count = cli.wait_for_alert(Path("/dev/nxp_simtemp"), sampling_us=100_000, max_periods=1)
     assert success is True
     assert count == 1
     assert sample == (1234567890, 42000, cli.SIMTEMP_FLAG_ALERT)
@@ -208,7 +239,7 @@ def test_wait_for_alert_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
         def register(self, handle: int, events: int) -> None:
             assert handle == fd
 
-        def poll(self, timeout: int) -> list[tuple[int, int]]:
+        def poll(self, timeout: int) -> List[Tuple[int, int]]:
             return []
 
     monkeypatch.setattr(cli.select, "poll", lambda: IdlePoll())
@@ -222,7 +253,7 @@ def test_wait_for_alert_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "monotonic", fake_monotonic)
     monkeypatch.setattr(cli.time, "monotonic", fake_monotonic)
 
-    success, sample, count = cli.wait_for_alert(Path("/dev/nxp_simtemp"), sampling_ms=100, max_periods=1)
+    success, sample, count = cli.wait_for_alert(Path("/dev/nxp_simtemp"), sampling_us=100_000, max_periods=1)
     assert success is False
     assert sample is None
     assert count == 0
@@ -236,10 +267,10 @@ def test_wait_for_alert_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_main_test_command_success(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Invoking `nxp_simtemp main test` reports PASS and restores original settings."""
 
-    writes: list[tuple[str, str]] = []
+    writes: List[Tuple[str, str]] = []
 
     class FakeDevice:
-        def __init__(self, sysfs_root: Path, index: int, device_path: Path | None) -> None:
+        def __init__(self, sysfs_root: Path, index: int, device_path: Optional[Path]) -> None:
             self.sysfs_root = sysfs_root
             self.index = index
             self.device_path = device_path
@@ -249,7 +280,7 @@ def test_main_test_command_success(monkeypatch: pytest.MonkeyPatch, capsys: pyte
             writes.append((name, value))
 
         def snapshot(self) -> cli.SimtempConfig:
-            return cli.SimtempConfig(sampling_ms=100, threshold_mc=46000, mode="normal")
+            return cli.SimtempConfig(sampling_us=100_000, threshold_mc=46000, mode="normal")
 
     monkeypatch.setattr(cli, "SimtempDevice", FakeDevice)
     monkeypatch.setattr(
@@ -284,111 +315,3 @@ def test_main_handles_device_errors(monkeypatch: pytest.MonkeyPatch, capsys: pyt
     captured = capsys.readouterr().err
     assert excinfo.value.code == 2  # argparse exits with code 2 on parser errors
     assert "sysfs root missing" in captured
-
-
-def test_simtemp_device_snapshot_and_write(tmp_path: Path) -> None:
-    sysfs_root = tmp_path
-    devdir = sysfs_root / "simtemp0"
-    devdir.mkdir()
-    (devdir / "sampling_ms").write_text("100\n")
-    (devdir / "threshold_mC").write_text("45000\n")
-    (devdir / "mode").write_text("normal\n")
-
-    device = cli.SimtempDevice(sysfs_root, index=0, device_path=Path("/dev/fake"))
-    snapshot = device.snapshot()
-    assert snapshot.sampling_ms == 100
-    assert snapshot.threshold_mc == 45000
-    assert snapshot.mode == "normal"
-
-    device.write("sampling_ms", "250")
-    assert (devdir / "sampling_ms").read_text().strip() == "250"
-
-
-def test_wait_for_alert_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    fd = 99
-    opened: list[Path] = []
-
-    def fake_open(path: str | Path, flags: int) -> int:
-        opened.append(Path(path))
-        return fd
-
-    monkeypatch.setattr(os, "open", fake_open)
-    monkeypatch.setattr(os, "close", lambda _: None)
-
-    sample_bytes = cli.SIMTEMP_SAMPLE_STRUCT.pack(
-        1234567890,
-        42000,
-        cli.SIMTEMP_FLAG_ALERT,
-    )
-    reads = [sample_bytes]
-
-    def fake_read(handle: int, size: int) -> bytes:
-        assert handle == fd
-        assert size == cli.SIMTEMP_SAMPLE_STRUCT.size
-        return reads.pop(0) if reads else b""
-
-    monkeypatch.setattr(os, "read", fake_read)
-
-    class FakePoll:
-        def __init__(self) -> None:
-            self.registered: tuple[int, int] | None = None
-            self.calls = 0
-
-        def register(self, handle: int, events: int) -> None:
-            self.registered = (handle, events)
-
-        def poll(self, timeout: int) -> list[tuple[int, int]]:
-            self.calls += 1
-            assert timeout > 0
-            return [(fd, 0)]  # signal data immediately
-
-    fake_poll = FakePoll()
-    monkeypatch.setattr(cli.select, "poll", lambda: fake_poll)
-
-    ticks = [0.0]
-
-    def fake_monotonic() -> float:
-        ticks[0] += 0.01
-        return ticks[0]
-
-    monkeypatch.setattr(time, "monotonic", fake_monotonic)
-    monkeypatch.setattr(cli.time, "monotonic", fake_monotonic)
-
-    success, sample, count = cli.wait_for_alert(Path("/dev/nxp_simtemp"), sampling_ms=100, max_periods=1)
-    assert success is True
-    assert count == 1
-    assert sample == (1234567890, 42000, cli.SIMTEMP_FLAG_ALERT)
-    assert opened[0] == Path("/dev/nxp_simtemp")
-
-
-def test_wait_for_alert_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    fd = 55
-
-    monkeypatch.setattr(os, "open", lambda path, flags: fd)
-    monkeypatch.setattr(os, "close", lambda _: None)
-
-    # No data ever arrives.
-    monkeypatch.setattr(os, "read", lambda handle, size: b"")
-
-    class IdlePoll:
-        def register(self, handle: int, events: int) -> None:
-            assert handle == fd
-
-        def poll(self, timeout: int) -> list[tuple[int, int]]:
-            return []
-
-    monkeypatch.setattr(cli.select, "poll", lambda: IdlePoll())
-
-    ticks = [0.0]
-
-    def fake_monotonic() -> float:
-        ticks[0] += 0.3
-        return ticks[0]
-
-    monkeypatch.setattr(time, "monotonic", fake_monotonic)
-    monkeypatch.setattr(cli.time, "monotonic", fake_monotonic)
-
-    success, sample, count = cli.wait_for_alert(Path("/dev/nxp_simtemp"), sampling_ms=100, max_periods=1)
-    assert success is False
-    assert sample is None
-    assert count == 0
