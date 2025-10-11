@@ -143,6 +143,6 @@ sudo rmmod nxp_simtemp
 
 ## Out-of-scope
 - GUI dashboard and additional lint tooling remain out of scope for this challenge submission.
-## Submission Links (TO DO)
-- git repo: <ADD LINK>
-- Demo video: <ADD LINK>
+## Submission Links
+- git repo: https://github.com/Syncdelic/nxp_simtemp
+- Demo video: https://youtu.be/94jCOQFRSrE
