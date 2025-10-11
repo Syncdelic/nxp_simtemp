@@ -6,6 +6,7 @@
 #include <linux/init.h>
 #include <linux/fs.h>
 #include <linux/jiffies.h>
+#include <linux/delay.h>
 #include <linux/kstrtox.h>
 #include <linux/ktime.h>
 #include <linux/minmax.h>
@@ -69,20 +70,24 @@ static bool simtemp_buffer_has_data(const struct simtemp_device *sim)
 
 static unsigned long simtemp_delay_jiffies(const struct simtemp_device *sim)
 {
-	unsigned int ms = READ_ONCE(sim->sampling_ms);
+	unsigned int ms = DIV_ROUND_UP(READ_ONCE(sim->sampling_us), 1000U);
 	unsigned long delay = msecs_to_jiffies(ms);
 	return delay ? delay : 1UL;
 }
 
 static void simtemp_restart_timer(struct simtemp_device *sim)
 {
-	unsigned long delay;
-
 	if (READ_ONCE(sim->stopping))
 		return;
 
-	delay = simtemp_delay_jiffies(sim);
-	mod_timer(&sim->sample_timer, jiffies + delay);
+	if (READ_ONCE(sim->use_thread)) {
+		struct task_struct *task = READ_ONCE(sim->sample_task);
+		if (task)
+			wake_up_process(task);
+		return;
+	}
+
+	mod_timer(&sim->sample_timer, jiffies + simtemp_delay_jiffies(sim));
 }
 
 static void simtemp_set_mode(struct simtemp_device *sim, enum simtemp_mode mode)
@@ -181,9 +186,8 @@ static void simtemp_push_sample(struct simtemp_device *sim,
 	wake_up_interruptible(&sim->waitq);
 }
 
-static void simtemp_timer_cb(struct timer_list *t)
+static void simtemp_produce_sample(struct simtemp_device *sim)
 {
-	struct simtemp_device *sim = simtemp_from_timer(t);
 	struct simtemp_sample sample = { 0 };
 	s32 temp;
 
@@ -195,13 +199,56 @@ static void simtemp_timer_cb(struct timer_list *t)
 		sample.flags |= SIMTEMP_SAMPLE_FLAG_THRESHOLD_ALERT;
 
 	simtemp_push_sample(sim, &sample);
+}
+
+static void simtemp_timer_cb(struct timer_list *t)
+{
+	struct simtemp_device *sim = simtemp_from_timer(t);
+
+	simtemp_produce_sample(sim);
 
 	if (!READ_ONCE(sim->stopping))
 		simtemp_restart_timer(sim);
 }
 
+#if IS_ENABLED(CONFIG_HIGH_RES_TIMERS)
+static void simtemp_worker_sleep(u32 us)
+{
+	if (us >= 1000U) {
+		msleep_interruptible(us / 1000U);
+	} else {
+		u32 slack = max_t(u32, 50U, us / 4U);
+		usleep_range(us, us + slack);
+	}
+}
+
+static int simtemp_worker_thread(void *data)
+{
+	struct simtemp_device *sim = data;
+
+	while (!kthread_should_stop()) {
+		if (READ_ONCE(sim->stopping))
+			break;
+
+		simtemp_produce_sample(sim);
+
+		if (READ_ONCE(sim->stopping))
+			break;
+
+		simtemp_worker_sleep(max_t(u32,
+					    READ_ONCE(sim->sampling_us),
+					    SIMTEMP_SAMPLING_US_MIN));
+	}
+
+	return 0;
+}
+#endif
+
+#if IS_ENABLED(CONFIG_HIGH_RES_TIMERS)
+#endif
+
 static ssize_t sampling_ms_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
+					struct device_attribute *attr, char *buf)
 {
 	struct simtemp_device *sim;
 	u32 sampling;
@@ -211,7 +258,7 @@ static ssize_t sampling_ms_show(struct device *dev,
 		return -ENODEV;
 
 	mutex_lock(&sim->lock);
-	sampling = sim->sampling_ms;
+	sampling = DIV_ROUND_CLOSEST(sim->sampling_us, 1000U);
 	mutex_unlock(&sim->lock);
 
 	return sysfs_emit(buf, "%u\n", sampling);
@@ -242,7 +289,7 @@ static ssize_t sampling_ms_store(struct device *dev,
 		dev_warn(sim->dev,
 			 "sampling_ms clamped to %u ms (was %u)\n",
 			 clamped, value);
-	sim->sampling_ms = clamped;
+	sim->sampling_us = clamped * 1000U;
 	mutex_unlock(&sim->lock);
 
 	simtemp_restart_timer(sim);
@@ -250,6 +297,63 @@ static ssize_t sampling_ms_store(struct device *dev,
 	return count;
 }
 static DEVICE_ATTR_RW(sampling_ms);
+
+static ssize_t sampling_us_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	struct simtemp_device *sim = simtemp_from_classdev(dev);
+	u32 sampling;
+
+	if (sim == NULL)
+		return -ENODEV;
+
+	mutex_lock(&sim->lock);
+	sampling = sim->sampling_us;
+	mutex_unlock(&sim->lock);
+
+	return sysfs_emit(buf, "%u\n", sampling);
+}
+
+static ssize_t sampling_us_store(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	struct simtemp_device *sim = simtemp_from_classdev(dev);
+	u32 value;
+	u32 clamped;
+	int ret;
+
+	if (sim == NULL)
+		return -ENODEV;
+
+	ret = kstrtouint(buf, 0, &value);
+	if (ret != 0)
+		return ret;
+
+	clamped = clamp_t(u32, value,
+			 SIMTEMP_SAMPLING_US_MIN, SIMTEMP_SAMPLING_US_MAX);
+
+	if (clamped != value)
+		dev_warn(sim->dev,
+			 "sampling_us clamped to %u us (was %u)\n",
+			 clamped, value);
+
+	if (!READ_ONCE(sim->use_thread) && clamped < 1000U) {
+		dev_warn(sim->dev,
+			 "sampling_us=%u us requested but high-res timers unavailable; rounding up to 1000 us\n",
+			 clamped);
+		clamped = 1000U;
+	}
+
+	mutex_lock(&sim->lock);
+	sim->sampling_us = clamped;
+	mutex_unlock(&sim->lock);
+
+	simtemp_restart_timer(sim);
+
+	return count;
+}
+static DEVICE_ATTR_RW(sampling_us);
 
 static ssize_t threshold_mC_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -373,14 +477,30 @@ static void simtemp_parse_dt(struct simtemp_device *sim)
 	if (!np)
 		return;
 
-	if (!of_property_read_u32(np, "sampling-ms", &val)) {
+	if (!of_property_read_u32(np, "sampling-us", &val)) {
+		u32 clamped = clamp_t(u32, val,
+				    SIMTEMP_SAMPLING_US_MIN, SIMTEMP_SAMPLING_US_MAX);
+
+		if (clamped != val)
+			dev_warn(dev, "sampling-us clamped to %u us (was %u)\n",
+				 clamped, val);
+
+	if (!sim->use_thread && clamped < 1000U) {
+			dev_warn(dev,
+				 "sampling-us=%u us requested but high-res timers unavailable; rounding up to 1000 us\n",
+				 clamped);
+			clamped = 1000U;
+		}
+
+		sim->sampling_us = clamped;
+	} else if (!of_property_read_u32(np, "sampling-ms", &val)) {
 		u32 clamped = clamp_t(u32, val,
 				    SIMTEMP_SAMPLING_MS_MIN, SIMTEMP_SAMPLING_MS_MAX);
 
 		if (clamped != val)
 			dev_warn(dev, "sampling-ms clamped to %u ms (was %u)\n",
 				 clamped, val);
-		sim->sampling_ms = clamped;
+		sim->sampling_us = clamped * 1000U;
 	}
 
 	if (!of_property_read_u32(np, "threshold-mC", &val))
@@ -406,6 +526,7 @@ static void simtemp_parse_dt(struct simtemp_device *sim)
 
 static struct attribute *simtemp_attrs[] = {
 	&dev_attr_sampling_ms.attr,
+	&dev_attr_sampling_us.attr,
 	&dev_attr_threshold_mC.attr,
 	&dev_attr_mode.attr,
 	&dev_attr_stats.attr,
@@ -553,10 +674,16 @@ static int simtemp_probe(struct platform_device *pdev)
 	spin_lock_init(&sim->buf_lock);
 	init_waitqueue_head(&sim->waitq);
 	timer_setup(&sim->sample_timer, simtemp_timer_cb, 0);
+	sim->sample_task = NULL;
+#if IS_ENABLED(CONFIG_HIGH_RES_TIMERS)
+	sim->use_thread = true;
+#else
+	sim->use_thread = false;
+#endif
 
 	sim->dev = &pdev->dev;
 	sim->class_dev = NULL;
-	sim->sampling_ms = SIMTEMP_DEFAULT_SAMPLING_MS;
+	sim->sampling_us = SIMTEMP_DEFAULT_SAMPLING_US;
 	sim->threshold_mc = SIMTEMP_DEFAULT_THRESHOLD_MC;
 	sim->head = 0U;
 	sim->tail = 0U;
@@ -603,13 +730,26 @@ static int simtemp_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, sim);
 
+	if (sim->use_thread) {
+		sim->sample_task = kthread_run(simtemp_worker_thread, sim,
+				            "simtemp/%d", sim->id);
+		if (IS_ERR(sim->sample_task)) {
+			dev_warn(&pdev->dev,
+				 "failed to start worker thread; falling back to timer path\n");
+			sim->sample_task = NULL;
+			sim->use_thread = false;
+		}
+	}
+
 	simtemp_restart_timer(sim);
 
 	dev_info(&pdev->dev,
-		 "%s probed%s (sampling=%u ms threshold=%d mC)\n",
+		 "%s probed%s (sampling=%uus threshold=%d mC%s)\n",
 		 SIMTEMP_DRIVER_NAME,
 		 (pdev->dev.of_node != NULL) ? " (DT match)" : " (name match)",
-		 sim->sampling_ms, sim->threshold_mc);
+		 sim->sampling_us,
+		 sim->threshold_mc,
+		 sim->use_thread ? " worker" : "");
 
 	return 0;
 }
@@ -624,7 +764,15 @@ static int simtemp_remove_int(struct platform_device *pdev)
 	if (sim != NULL) {
 		WRITE_ONCE(sim->stopping, true);
 		wake_up_interruptible(&sim->waitq);
-		simtemp_timer_shutdown(&sim->sample_timer);
+		if (READ_ONCE(sim->use_thread)) {
+#if IS_ENABLED(CONFIG_HIGH_RES_TIMERS)
+			if (sim->sample_task)
+				kthread_stop(sim->sample_task);
+			sim->sample_task = NULL;
+#endif
+		} else {
+			simtemp_timer_shutdown(&sim->sample_timer);
+		}
 		misc_deregister(&sim->miscdev);
 		simtemp_sysfs_unregister(sim);
 		ida_free(&simtemp_ida, sim->id);
@@ -727,3 +875,7 @@ module_exit(simtemp_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Rodrigo Rea");
 MODULE_DESCRIPTION("NXP Simulated Temperature Sensor (data path skeleton)");
+#if IS_ENABLED(CONFIG_HIGH_RES_TIMERS)
+extern void hrtimer_init(struct hrtimer *timer, clockid_t which_clock,
+			 enum hrtimer_mode mode);
+#endif

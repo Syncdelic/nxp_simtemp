@@ -7,6 +7,7 @@
 #include <linux/bits.h>
 #include <linux/device.h>
 #include <linux/miscdevice.h>
+#include <linux/kthread.h>
 #include <linux/mutex.h>
 #include <linux/spinlock.h>
 #include <linux/timer.h>
@@ -19,9 +20,12 @@
 #define SIMTEMP_COMPATIBLE           "nxp,simtemp"
 
 #define SIMTEMP_DEFAULT_SAMPLING_MS  (100U)
+#define SIMTEMP_DEFAULT_SAMPLING_US  (SIMTEMP_DEFAULT_SAMPLING_MS * 1000U)
 #define SIMTEMP_DEFAULT_THRESHOLD_MC (45000)
 #define SIMTEMP_SAMPLING_MS_MIN      (5U)
 #define SIMTEMP_SAMPLING_MS_MAX      (5000U)
+#define SIMTEMP_SAMPLING_US_MIN      (100U)
+#define SIMTEMP_SAMPLING_US_MAX      (SIMTEMP_SAMPLING_MS_MAX * 1000U)
 
 #define SIMTEMP_RING_DEPTH           (64U)
 
@@ -62,7 +66,7 @@ struct simtemp_device {
 	struct mutex lock;
 	spinlock_t buf_lock;
 	wait_queue_head_t waitq;
-	u32 sampling_ms;
+	u32 sampling_us;
 	s32 threshold_mc;
 	int id;
 	struct simtemp_sample ring[SIMTEMP_RING_DEPTH];
@@ -74,6 +78,8 @@ struct simtemp_device {
 	bool stopping;
 	s32 last_temp_mc;
 	struct timer_list sample_timer;
+	struct task_struct *sample_task;
+	bool use_thread;
 	char chardev_name[32];
 	u32 updates;
 	u32 alerts;

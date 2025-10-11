@@ -30,11 +30,12 @@ DEFAULT_SYSFS_ROOT = Path("/sys/class/simtemp")
 DEFAULT_TEST_THRESHOLD_MC = 20000
 DEFAULT_TEST_MAX_PERIODS = 2
 DEFAULT_POLL_TIMEOUT_MS = 1000
+MICROS_PER_SEC = 1_000_000
 
 
 @dataclass
 class SimtempConfig:
-    sampling_ms: int
+    sampling_us: int
     threshold_mc: int
     mode: str
 
@@ -68,8 +69,13 @@ class SimtempDevice:
         self._attr_path(name).write_text(f"{value}\n")
 
     def snapshot(self) -> SimtempConfig:
+        try:
+            sampling_us = self.read_int("sampling_us")
+        except FileNotFoundError:
+            sampling_us = self.read_int("sampling_ms") * 1000
+
         return SimtempConfig(
-            sampling_ms=self.read_int("sampling_ms"),
+            sampling_us=sampling_us,
             threshold_mc=self.read_int("threshold_mC"),
             mode=self.read_str("mode"),
         )
@@ -80,11 +86,22 @@ def iso8601_from_ns(ns: int) -> str:
     return dt.isoformat(timespec="milliseconds")
 
 
+def write_sampling(device: SimtempDevice, *, sampling_us: Optional[int], sampling_ms: Optional[int]) -> None:
+    if sampling_us is not None:
+        try:
+            device.write("sampling_us", str(sampling_us))
+            return
+        except FileNotFoundError:
+            # Fallback to millisecond attribute on older kernels.
+            sampling_ms = max(1, sampling_us // 1000)
+
+    if sampling_ms is not None:
+        device.write("sampling_ms", str(sampling_ms))
+
 def stream_command(args: argparse.Namespace) -> int:
     device = SimtempDevice(args.sysfs_root, args.index, args.device)
 
-    if args.sampling_ms is not None:
-        device.write("sampling_ms", str(args.sampling_ms))
+    write_sampling(device, sampling_us=args.sampling_us, sampling_ms=args.sampling_ms)
     if args.threshold_mc is not None:
         device.write("threshold_mC", str(args.threshold_mc))
     if args.mode is not None:
@@ -130,12 +147,12 @@ def stream_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def wait_for_alert(char_device: Path, sampling_ms: int, max_periods: int) -> tuple[bool, Optional[tuple[int, int, int]], int]:
+def wait_for_alert(char_device: Path, sampling_us: int, max_periods: int) -> tuple[bool, Optional[tuple[int, int, int]], int]:
     fd = os.open(char_device, os.O_RDONLY | os.O_NONBLOCK)
     poller = select.poll()
     poller.register(fd, select.POLLIN | select.POLLPRI)
 
-    timeout_s = max_periods * sampling_ms / 1000.0
+    timeout_s = max_periods * sampling_us / MICROS_PER_SEC
     deadline = time.monotonic() + max(timeout_s, 0.5)
     samples = 0
     try:
@@ -163,22 +180,26 @@ def wait_for_alert(char_device: Path, sampling_ms: int, max_periods: int) -> tup
 def test_command(args: argparse.Namespace) -> int:
     device = SimtempDevice(args.sysfs_root, args.index, args.device)
     original = device.snapshot()
-    changed_sampling = args.sampling_ms is not None
+    changed_sampling = args.sampling_ms is not None or args.sampling_us is not None
     changed_mode = args.mode is not None
 
     try:
-        if args.sampling_ms is not None:
-            device.write("sampling_ms", str(args.sampling_ms))
+        write_sampling(device, sampling_us=args.sampling_us, sampling_ms=args.sampling_ms)
         if args.mode is not None:
             device.write("mode", args.mode)
 
         test_threshold = args.threshold_mc if args.threshold_mc is not None else DEFAULT_TEST_THRESHOLD_MC
         device.write("threshold_mC", str(test_threshold))
 
-        effective_sampling = args.sampling_ms if args.sampling_ms is not None else original.sampling_ms
+        effective_sampling_us = (
+            args.sampling_us
+            if args.sampling_us is not None
+            else args.sampling_ms * 1000 if args.sampling_ms is not None
+            else original.sampling_us
+        )
         success, sample, count = wait_for_alert(
             device.char_device,
-            sampling_ms=effective_sampling,
+            sampling_us=effective_sampling_us,
             max_periods=args.max_periods,
         )
 
@@ -191,13 +212,13 @@ def test_command(args: argparse.Namespace) -> int:
 
         print(
             "FAIL: no threshold alert within "
-            f"{args.max_periods} period(s) (sampling_ms={effective_sampling})"
+            f"{args.max_periods} period(s) (sampling_us={effective_sampling_us})"
         )
         return 1
     finally:
         device.write("threshold_mC", str(original.threshold_mc))
         if changed_sampling:
-            device.write("sampling_ms", str(original.sampling_ms))
+            write_sampling(device, sampling_us=original.sampling_us, sampling_ms=None)
         if changed_mode:
             device.write("mode", original.mode)
 
@@ -248,12 +269,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop after D seconds (default: run until interrupted)",
     )
     stream.add_argument("--sampling-ms", type=positive_int, default=None, help="Update sampling period")
+    stream.add_argument("--sampling-us", type=positive_int, default=None, help="Update sampling period in microseconds")
     stream.add_argument("--threshold-mc", type=int, default=None, help="Update threshold in milli °C")
     stream.add_argument("--mode", choices=["normal", "noisy", "ramp"], default=None, help="Select mode")
     stream.set_defaults(func=stream_command)
 
     test = subparsers.add_parser("test", help="Run threshold alert self-test")
     test.add_argument("--sampling-ms", type=positive_int, default=None, help="Override sampling period for the test")
+    test.add_argument("--sampling-us", type=positive_int, default=None, help="Override sampling period (microseconds)")
     test.add_argument(
         "--threshold-mc",
         type=int,
