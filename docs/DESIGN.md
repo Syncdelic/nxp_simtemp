@@ -38,12 +38,12 @@ graph TD
 - Python CLI (`user/cli/main.py`) provides `stream` and `test` subcommands using `select.poll()`; non-blocking reads now swallow `EAGAIN`, preventing spurious failures when the ring drains between wakeups.
 - Automation scripts: `build.sh` handles Secure Boot signing; `run_demo.sh` rebuilds on demand, loads, runs CLI stream/test, prints stats, and unloads.
 
-### Verification status (2025-10-09)
-- Fedora 42 (6.16.8 / 6.16.9): `./scripts/build.sh` signs successfully; `./scripts/run_demo.sh` (stream/test) passes; `pytest -vv` reports 15/15 CLI unit tests.
-- Orange Pi Zero3 (Armbian 25, 6.12.47): rebuilt against Armbian headers, configfs overlay applied, `./scripts/run_demo.sh` passes (stats updates, errors=0).
-- Ubuntu 24.04.3 LTS cloud VM (6.8.0-85): `./scripts/build.sh` succeeds after switching apt sources to HTTPS; `./scripts/run_demo.sh` passes the stream/test sequence.
-- Raspberry Pi 4B (6.12.44-current-bcm2711): `./scripts/run_demo.sh` passes on stock Raspberry Pi OS (driver + CLI flows).
-- Remaining work: optional hrtimer path for ≥1 kHz sampling and tighter CI integration.
+### Verification status (2025-10-11)
+- Fedora 42 (6.16.8 / 6.16.9): `./scripts/build.sh` signs successfully; `./scripts/run_demo.sh` (stream/test) passes; `pytest -vv` reports 17/17 CLI unit tests; 5 s run at `sampling_us=100` yielded ~5.6×10⁵ samples, `errors=0`.
+- Orange Pi Zero3 (Armbian 25, 6.12.47): rebuilt against Armbian headers, configfs overlay applied, `./scripts/run_demo.sh` passes; worker thread produced ~2.8×10⁵ samples in 5 s at `sampling_us=100` with `errors=0`.
+- Ubuntu 24.04.3 LTS cloud VM (6.8.0-85): `./scripts/build.sh` succeeds; worker stress at `sampling_us=100` produced ~3.1×10⁵ samples, `errors=0`; demo script passes.
+- Raspberry Pi 4B (Armbian 6.12.44): module loads with `force_create_dev=1`; 5 s stream at `sampling_us=100` produced ~2.7×10⁵ samples, `errors=0`; demo script passes.
+- Remaining work: tighten CI around the worker thread and explore dynamic ring sizing for future >10 kHz scenarios.
 
 ## Locking & API rationale
 
@@ -61,6 +61,6 @@ graph TD
 
 ## Next steps
 
-1. Explore high-rate sampling by swapping the legacy timer for `hrtimer`/high-resolution work, revisiting locking and buffer sizing for ≥1 kHz scenarios.
+1. Tune the worker-thread sleep strategy and ring depth for >10 kHz experiments; consider batching reads to reduce syscall cost.
 2. Finalise submission collateral: README links (repo/video), design narrative updates (locking, scaling), and git-send-email patch workflow.
-3. Evaluate automation (CI or scripted stress runs) once the high-rate path lands.
+3. Evaluate CI automation (unit tests + 10 kHz smoke) on at least one arm64 target.

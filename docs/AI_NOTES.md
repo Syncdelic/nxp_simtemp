@@ -58,3 +58,8 @@ sudo rmdir /sys/kernel/config/device-tree/overlays/nxp-simtemp
 - Added pytest suite (`tests/test_cli.py`) covering boundary, white-box, and black-box cases for the Python CLI helpers.
 - Introduced `requirements-dev.txt` plus README instructions for creating a venv and running `pytest -vv`.
 - Captured the pytest workflow in `docs/TESTPLAN.md` (new T8) with recorded PASS results on Fedora 42.
+
+## 2025-10-10 — High-rate worker validation
+- Replaced the planned hrtimer path with a kthread-based sampler capable of `sampling_us=100`.
+- Validated 5 s, 100 µs runs on Fedora 42, Ubuntu 24.04 VM, Orange Pi Zero3, and Raspberry Pi 4B (Armbian) with `errors=0` and PASSing self-tests.
+- Updated README, DESIGN, and TESTPLAN with cross-platform stress results and new testing instructions.

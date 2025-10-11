@@ -148,7 +148,7 @@
 **Result (2025-10-09)**
 - PASS (`pytest -vv` reported 15/15 tests in 0.14s on Fedora 42).
 
-## T9 — Optional Stress / Scaling
+## T9 — Optional Stress / Scaling (Legacy Timer)
 **Commands**
 - `echo 5 | sudo tee /sys/class/simtemp/simtemp0/sampling_ms`
 - `sudo python3 user/cli/main.py stream --duration 5`
@@ -158,5 +158,27 @@
 - Stream runs without errors for 5 seconds at ~200 Hz (5 ms clamp); `updates` climbs quickly; `errors` remains 0.
 - Note CPU utilisation; document limitations and plan for hrtimer-based enhancement before attempting ≥1 kHz.
 
+## T10 — High-rate Worker (sampling_us=100)
+**Commands**
+- `echo 100 | sudo tee /sys/class/simtemp/simtemp0/sampling_us`
+- `sudo python3 user/cli/main.py stream --duration 5`
+- `sudo python3 user/cli/main.py test --sampling-us 100 --max-periods 5`
+- `cat /sys/class/simtemp/simtemp0/stats`
+
+**Expected**
+- Worker thread produces ~50k samples/s without overruns (`errors=0`).
+- CLI stream/test remain stable; timestamps monotonic and alerts raised promptly.
+
+**Result (2025-10-10, Fedora 42 / 6.16.9)**
+- `sampling_us` → `updates` 561,215 / `alerts` 313,118 / `errors` 0 after 5 s; high-rate self-test PASS.
+
+**Result (2025-10-10, Ubuntu 24.04 VM / 6.8.0-85)**
+- `sampling_us` → `updates` 309,721 / `alerts` 186,396 / `errors` 0 after 5 s; high-rate self-test PASS.
+
+**Result (2025-10-10, Orange Pi Zero3 / Armbian 6.12.47)**
+- Overlay + worker thread produced `updates` 281,082 / `alerts` 175,522 / `errors` 0; high-rate self-test PASS.
+
+**Result (2025-10-11, Raspberry Pi 4B / Armbian 6.12.44)**
+- `force_create_dev=1`; `updates` 267,950 / `alerts` 184,490 / `errors` 0; high-rate self-test PASS.
 
 Record PASS/FAIL for each test and any observations (warnings, thresholds, anomalies) before submission.

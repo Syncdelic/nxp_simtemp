@@ -115,10 +115,10 @@ sudo mokutil --import /var/lib/shim-signed/keys/MOK.der
 After the enrolment reboot, subsequent builds produce signed modules accepted by the kernel.
 
 ## Portability status
-- **Fedora 42 (6.16.8/6.16.9)**: module builds/signs/loads; CLI stream/test pass; `run_demo.sh` completes.
-- **Armbian 25 (6.12.47-current-sunxi64)**: module rebuilt against the Armbian tree; DT overlay applied; CLI stream/test validated on Orange Pi Zero3 with overlay (no `force_create_dev`).
-- **Ubuntu 24.04.3 LTS (6.8.0-85-generic, cloud VM)**: `./scripts/build.sh` builds the module after switching apt sources to HTTPS; vermagic matches the stock kernel.
-- **Raspberry Pi OS (6.12.44-current-bcm2711)**: `./scripts/run_demo.sh` builds/loads the module on Raspberry Pi 4B (no overlay required); CLI stream/test pass end-to-end.
+- **Fedora 42 (6.16.8/6.16.9)**: module builds/signs/loads; 5 s stress at `sampling_us=100` produced ~5.6×10⁵ samples with `errors=0`; `run_demo.sh` completes.
+- **Ubuntu 24.04.3 LTS (6.8.0-85-generic, cloud VM)**: 5 s stress at `sampling_us=100` yielded ~3.1×10⁵ samples, `errors=0`; standard demo still passes.
+- **Armbian 25 (6.12.47-current-sunxi64, Orange Pi Zero3)**: DT overlay + worker thread produce ~2.8×10⁵ samples in 5 s with `errors=0`; overlay load/unload flow documented below.
+- **Raspberry Pi OS (6.12.44-current-bcm2711)**: `force_create_dev=1` path sustains ~2.7×10⁵ samples in 5 s with `errors=0`; demo script passes.
 
 ## Documentation set
 - `docs/DESIGN.md`: architecture, DT mapping, portability roadmap.
@@ -132,6 +132,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
 pytest -vv
+# High-rate smoke (run as root)
+sudo insmod kernel/nxp_simtemp.ko force_create_dev=1
+echo 100 | sudo tee /sys/class/simtemp/simtemp0/sampling_us
+sudo python3 user/cli/main.py stream --duration 5 > /tmp/samples.log
+sudo python3 user/cli/main.py test --sampling-us 100 --max-periods 5
+sudo rmmod nxp_simtemp
 ```
 `pytest -vv` surfaces each boundary, white-box, and black-box case in `tests/test_cli.py`, while `./scripts/run_demo.sh` exercises the end-to-end kernel/CLI flow.
 
